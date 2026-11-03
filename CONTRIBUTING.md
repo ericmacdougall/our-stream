@@ -1,6 +1,6 @@
 # Contributing to our-stream
 
-Thank you for considering a contribution. This project is licensed under AGPL-3.0-only; by contributing you agree that your contribution is licensed under the same terms.
+Thank you for considering a contribution. The platform is licensed under AGPL-3.0-only, `apps/mobile` under Apache-2.0, and `packages/contracts` under AGPL-3.0-only OR Apache-2.0; by contributing you agree that your contribution is licensed under the terms of the directory it touches.
 
 ## Ground rules
 

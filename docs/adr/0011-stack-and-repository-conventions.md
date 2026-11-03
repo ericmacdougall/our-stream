@@ -24,7 +24,7 @@ Status: proposed, 2026-11-03. Confidence: high (versions verified in docs/resear
 | Lint/format | ESLint (typescript-eslint), Prettier, eslint-plugin-jsx-a11y, custom rule banning permissioned accessors in `"use cache"` | quality gates |
 | i18n | ICU messages via `@formatjs` (web and mobile), locale negotiation, RTL-ready layout tokens | i18n from day one |
 | Design | small token-based design system in `packages/ui`; WCAG 2.2 AA target | accessibility |
-| License | AGPL-3.0-only for the platform; SPDX header on every source file; `REUSE.toml`; third-party license report in CI; the web UI and mobile app show an AGPL §13 "source code" link pointing at the running version's commit; licensing of `apps/mobile` for app-store distribution is an open question (Q13) to settle before the first external contribution | public repo hygiene |
+| License | AGPL-3.0-only for the platform; SPDX header on every source file; `REUSE.toml`; third-party license report in CI; the web UI and mobile app show an AGPL §13 "source code" link pointing at the running version's commit; `apps/mobile` is licensed Apache-2.0 (decided 2026-11-03, docs/decisions.md Q13) with its own `LICENSE` file and `Apache-2.0` SPDX headers, so the public app can be distributed through app stores; it depends on the platform only through the public API and `packages/contracts` (which is dual-licensed AGPL-3.0-only OR Apache-2.0 so the client can consume it) | public repo hygiene; app-store compatibility |
 
 ## Repository conventions
 

@@ -29,7 +29,7 @@ TypeScript monorepo (pnpm): Next.js web PWA, Fastify API with OpenAPI, pg-boss w
 
 ## License
 
-AGPL-3.0-only. See `LICENSE`. Contributions are accepted under the same license with a DCO sign-off; see `CONTRIBUTING.md`.
+The platform (web, API, workers, packages) is AGPL-3.0-only; see `LICENSE`. The mobile client in `apps/mobile` is Apache-2.0 (with its own `LICENSE`) so it can be distributed through app stores, and `packages/contracts` is dual-licensed AGPL-3.0-only OR Apache-2.0 so the client can consume it. Contributions are accepted under the license of the directory they touch with a DCO sign-off; see `CONTRIBUTING.md`.
 
 ## Security
 

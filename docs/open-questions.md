@@ -1,6 +1,6 @@
 # Open product questions for the user
 
-Status: 2026-11-03. Each item has a recommendation; work continues on independent parts meanwhile. Decisions are recorded in the decision log once answered.
+Status: 2026-11-03, all answered. The user accepted every recommendation below on 2026-11-03; the outcomes are recorded in `docs/decisions.md`. This file is kept as the record of the questions and their reasoning; new questions are appended with a status column.
 
 | # | Question | Why it matters | Recommendation |
 |---|---|---|---|
