@@ -21,7 +21,7 @@ Thank you for considering a contribution. This project is licensed under AGPL-3.
 
 ## Development setup
 
-See `docs/development.md` (to be added with the M0 scaffold) for prerequisites (Node 22, pnpm, Docker, ffmpeg), `docker compose up`, seeding demo content and running the apps.
+See `docs/development.md` (to be added with the M0 scaffold) for prerequisites (Node 24, pnpm, Docker, ffmpeg), `docker compose up`, seeding demo content and running the apps.
 
 ## Security issues
 

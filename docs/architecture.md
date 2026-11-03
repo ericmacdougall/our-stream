@@ -45,7 +45,7 @@ apps/
 packages/
   contracts/    Zod schemas and TS types shared by web, api, mobile (API contract)
   db/           Drizzle schema, migrations, RLS policies, seed, test fixtures
-  authz/        Permission kernel: canView/canEdit/..., visibility filters, epochs
+  authz/        Permission kernel: readerVisible / authorAccessible / auditorAccessible predicates, tuple writer, epochs
   pipeline/     Media and document processing (ffmpeg, parsers, chunking) as pure functions + adapters
   providers/    Model-provider abstraction with ZDR / residency metadata and policy router
   integrations/ Adapters: identity (oidc, saml, scim), sources (sharepoint), messengers (teams, email), exports (copilot), qa (goodqa)

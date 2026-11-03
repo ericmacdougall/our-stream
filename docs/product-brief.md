@@ -74,7 +74,7 @@ Deferred unless the outcome requires them: live streaming, external (customer-fa
 ## Success measures (v1)
 
 - Time-to-first-clip for a new workspace under 10 minutes from `docker compose up`.
-- 100% of permission tests pass; zero cross-tenant or cross-audience leaks in the red-team suite; retrieval results are provably a subset of `canView`.
+- 100% of permission tests pass; zero cross-tenant or cross-audience leaks in the red-team suite; retrieval results are provably a subset of `readerVisible` (ADR-0002), and no reader path ever returns a draft.
 - Feed first paint under 2 s on a mid-range phone over 4G with HLS startup under 1 s on cached ladders.
 - Retraction to feed removal and alert delivery under 60 s end to end.
 - WCAG 2.2 AA on the feed, upload and ask flows (automated axe plus manual keyboard/screen-reader pass).

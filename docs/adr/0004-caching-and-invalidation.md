@@ -9,7 +9,7 @@ The feed, search and answers are personalised and permissioned, so most response
 ## Decision
 
 1. **Epoch keys.** Two monotonic counters drive every cache key:
-   - `user.authz_epoch` increments when anything changes what that user may see (org role, group membership closure, stream role, direct grant, deactivation). Bulk changes (group of 10k users) bump epochs in the same reconcile job that updates materialised access.
+   - `user.authz_epoch` increments when anything changes what that user may see (org role, group membership closure, stream role, direct grant, deactivation). Revocations bump affected users' `authz_epoch` in the same transaction as the change, including bulk changes such as removing a 10k-member group (ADR-0002); only grants may bump epochs from the reconcile job.
    - `content.content_epoch` increments on any publish, version switch, metadata edit, audience change, pin/unpin, expiry or retraction.
    - An org-level `org_content_epoch` implemented as a per-org Postgres sequence (not a single updated row, which would serialise bulk writes) is advanced whenever any `content_epoch` in the org changes; list caches read its current value.
    - **Time-driven transitions**: `publish_at` and `expires_at` do not write rows by themselves, so a scheduled job (ADR-0003) bumps the item's `content_epoch` and the org sequence at the transition instant. In addition, every list and permitted-set cache key includes a `time_bucket` (floor of now to 60 s) and the entry TTL is capped at the time to the org's next known transition, whichever is sooner.
@@ -32,7 +32,7 @@ The feed, search and answers are personalised and permissioned, so most response
 ## Tests
 
 - Retract while cached: feed page cached → retract → next request (same instance, same user) excludes the item without any purge call (epoch changed).
-- Permission revoked while cached: same for `authz_epoch`.
+- Permission revoked while cached: same for `authz_epoch`, including removing a 10k-member group while the feed and permitted set are cached; the next request excludes the item with no job run.
 - Media: segment request after retraction or revocation fails on the next request in proxy mode; CDN purge call recorded (fake adapter).
 - Expiry with a cached list: an item whose `expires_at` passes disappears from the cached feed within 60 s without any write (fake clock).
 - Deactivated user with a live session: next feed, media and `/sync` request fails.

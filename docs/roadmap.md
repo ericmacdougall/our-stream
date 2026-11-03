@@ -16,6 +16,8 @@ Scope:
 - Upload (web): video or audio via multipart to object storage; pipeline: probe, HLS ladder, poster and sprite, ASR captions (self-hosted whisper sidecar by default, hosted provider adapter with a fake), manual chapters, links (intranet, internet, attached page).
 - Publish: audience (streams, groups, individuals, everyone per rules), draft, `publish_at`, `expires_at`; scheduled transitions bump epochs (ADR-0003/0004).
 - Web feed: vertical, swipeable, muted autoplay with captions, keyboard navigation, reduced motion, pause auto-advance; filter by stream; "open at chapter". No likes or comments yet.
+- Minimal transactional view recording (`view_start` and `complete` into `user_content_state` with the version id and a title snapshot) so retraction targeting works; richer engagement (milestones, rewatch, stats, viewer lists) stays in M1b.
+- Transactional auth email (invites, magic links) through an SMTP adapter with a fake and a compose mail catcher; password sign-in works without SMTP. Notification email digests stay in M1b.
 - Retraction and replacement with a new version; epoch-based cache invalidation; in-app notifications (neutral notice to viewers of a retracted version per ADR-0005).
 - Media through the authenticated proxy re-authorising every request; `private, no-store` on all personalised responses; service worker excludes `/api` and `/media`.
 - Self-host: `docker compose up` (postgres+pgvector, SeaweedFS, api, web, worker, whisper profile).
@@ -27,7 +29,7 @@ Scope:
 - Likes and comments (threaded, moderated per Q7), share as notification/link only.
 - Keyword search over titles, descriptions, captions and transcripts under `readerVisible`, including counts and snippets; results open the clip at the matching timestamp.
 - Engagement: view, progress milestones, complete, rewatch; per-clip stats and viewer lists under the org privacy mode (Q1).
-- Email channel; pinning and event tags (onboarding, announcement, current events, training) with feed filters by department and tag.
+- Notification email channel and digests; pinning and event tags (onboarding, announcement, current events, training) with feed filters by department and tag.
 - Helm chart skeleton.
 
 Out of scope for M1 (explicitly deferred): documents and the assistant (M2), calendar view and intranet pages (M3), acknowledgements and dashboards (M4), SSO/SCIM (M5), Microsoft integrations (M6), mobile upload and push (M10). Expiry and replacement ship in M1a; M3 only adds campaign scheduling UX and replacement targeting to askers (`asked_related`, which needs M2's question log).
@@ -60,10 +62,10 @@ M1b adds: search results, counts and snippets agree with the matrix; the Expo ap
 | M0 | Foundation | Repo, monorepo, CI, compose, DB with RLS and schema lint, authz kernel with `readerVisible`/`authorAccessible`/`auditorAccessible`, reference implementation and fixture matrix, a `chunk` table with tsvector and the retrieval-subset property test (so the predicate is proven over chunks before M2), design tokens, i18n scaffold, a11y lint, OpenAPI contract, fakes for adapters, rollout procedure (ADR-0012) | – |
 | M1a | Permissioned video feed, web | As above | M0 |
 | M1b | React, find and measure; Expo | As above | M1a, Q1, Q5, Q7 |
-| M2 | Knowledge base and assistant | Document upload and parsing (PDF, DOCX, PPTX, XLSX, MD), chunking, embeddings, hybrid search, permission-filtered answers with citations to clip timestamps and pages, question log, suggested chapters, model-provider policy UI, injection corpus | M1 |
+| M2 | Knowledge base and assistant | Document upload and parsing (PDF, DOCX, PPTX, XLSX, MD), chunking, embeddings, hybrid search, permission-filtered answers with citations to clip timestamps and pages, question log, suggested chapters, model-provider policy UI, injection corpus | M1a (search UI from M1b) |
 | M3 | Distribution and lifecycle | Calendar filter and view, intranet-style browsing (streams as sections, pages, links), scheduled campaigns, generic webhooks, "new version available" targeting to askers (`asked_related`) | M1b, M2 for `asked_related` |
 | M4 | Insight and attestation | Engagement rollups, team dashboard (questions, frequency, resolved vs unresolved), AI content suggestions, policy acknowledgement/attestation with version tracking and reminders, exports | M2 |
-| M5 | Enterprise identity and audit | OIDC (Entra, Okta, Google, generic), SAML, SCIM 2.0 server with conformance suite, group-to-audience mapping, MFA (TOTP, passkeys), audit log UI, session policies | M1 |
+| M5 | Enterprise identity and audit | OIDC (Entra, Okta, Google, generic), SAML, SCIM 2.0 server with conformance suite, group-to-audience mapping, MFA (TOTP, passkeys), audit log UI, session policies | M1a |
 | M6 | Microsoft 365 | SharePoint content source with delta, webhooks and ACL mirror; Teams app (bot notifications, personal tab with SSO); Copilot connector export with ACLs | M2, M5 |
 | M7 | Learning and language | Learning paths, quizzes feeding the misconception dashboard, expert Q&A routing (named experts; optional GoodQA adapter), multilingual auto-translation of captions, titles and answers (labelled), per-user language | M4 |
 | M8 | Trust and compliance | PII/secret scanning, retention policies and legal hold, data-subject export and delete, residency controls, SBOM and signed images, backup/restore runbooks | M2 |
