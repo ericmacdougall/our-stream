@@ -12,7 +12,7 @@ Status: draft v0.1, 2026-11-03. Decisions are recorded as ADRs in `docs/adr/`; t
                         ▼                      ▼
                  ┌──────────────────────────────────┐
                  │  apps/api  (Node, Fastify, Zod)   │  AuthN, authZ kernel, OpenAPI,
-                 │  packages/authz, packages/db      │  SCIM server, webhooks, signed URLs
+                 │  packages/authz, packages/db      │  SCIM server, webhooks, media proxy
                  └──────┬───────────────┬───────────┘
                         │               │ jobs (outbox -> queue)
                         ▼               ▼
@@ -68,7 +68,7 @@ Rule: `apps/*` never import each other; shared logic lives in `packages/*`. Inte
 - **Org** (tenant): settings, region, model policy, retention policy, identity config.
 - **User**, **Group** (local or synced via SCIM/directory; external ids per IdP), **Membership** (org role: member, contributor, admin, owner).
 - **Stream**: kind company | department | team | project | private; roles viewer, contributor, moderator, owner granted to users or groups. Personal stream = private stream with one member.
-- **Content**: kind clip | document | page | link | audio; owner; current version; state draft | scheduled | published | expired | retracted; event tags; pinned flags per stream; `requires_ack`.
+- **Content**: kind clip | document | page | link | audio; owner; current version; state draft | published | retracted (stored enum; "scheduled" and "expired" are derived display statuses computed from `publish_at` and `expires_at`, never stored); event tags; pinned flags per stream; `requires_ack`.
 - **ContentVersion**: immutable source object + derived assets (HLS ladder, thumbnails, captions, transcript, parsed text, chapters), processing status, checksum.
 - **Audience**: rows (content_id, stream_id | group_id | user_id | org_wide). Published content is visible if any audience row matches the viewer.
 - **Chunk**: (content_version_id, locator: timestamp range or page/slide/cell range, text, tsvector, embedding, lang). Chunks inherit visibility from content via content_version.
@@ -97,7 +97,7 @@ Versioning: derived artifacts live under `orgs/{org}/content/{content}/versions/
 
 ## Caching and invalidation
 
-Epoch-keyed caches: each user has an `authz_epoch` (bumped by membership, group, stream-role or audience changes affecting them) and each content item a `content_epoch` (bumped on version publish, retraction, metadata edits). Cache keys embed epochs, so stale entries are unreachable without explicit purge. Personalized HTTP responses are `private, no-store`; media is immutable-per-version with short-lived signatures; CDN purge by version prefix on retraction. Retrieval always re-checks version state in SQL so a cache lag can never resurface retracted content. See ADR-0004.
+Epoch-keyed caches: each user has an `authz_epoch` (bumped by membership, group, stream-role or audience changes affecting them) and each content item a `content_epoch` (bumped on version publish, retraction, metadata edits). Cache keys embed epochs, so stale entries are unreachable without explicit purge. Personalized HTTP responses are `private, no-store`; media is immutable-per-version and served by a proxy route that re-authorises every request (signed cookies only in CDN mode); CDN purge by version prefix on retraction. Epoch values for a cache key are read inside the same transaction snapshot as the query they key, before the query runs. Retrieval always re-checks version state in SQL so a cache lag can never resurface retracted content. See ADR-0004.
 
 ## Notifications and targeting
 
@@ -138,6 +138,6 @@ OpenTelemetry traces across api → queue → worker; structured JSON logs (pino
 - AGPL-3.0, no secrets in repo, dependency lockfile and audit in CI, SBOM.
 - Session: HttpOnly Secure SameSite=Lax cookies for web; short-lived access + refresh tokens for mobile stored in secure storage; CSRF for cookie-authenticated mutations.
 - Rate limits on auth, upload, ask, comments; upload size and type limits; antivirus hook point (ClamAV optional).
-- Signed media URLs; no public buckets; object keys are opaque.
+- Media only through the re-authorising proxy route (or signed cookies in CDN mode); no public buckets; object keys are opaque.
 - Audit log for every administrative and publishing action.
 - Threat model and red-team findings tracked in `docs/security/`.

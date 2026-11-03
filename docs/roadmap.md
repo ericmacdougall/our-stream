@@ -4,7 +4,7 @@ Status: proposed, 2026-11-03. Each milestone is independently shippable and demo
 
 ## First end-to-end slice: M1 "Permissioned video feed", shipped as M1a and M1b
 
-Revised after plan review round 1 (F5): M1 is split into two shippable increments so the first one depends on no open product question.
+Revised after plan review round 1 (F5): M1 is split into two shippable increments so the first one depends only on Q2 (email + password + magic link) and Q6 (private streams as member streams), both adopted as the recommended defaults and recorded as assumptions.
 
 ### M1a (web only): publish a clip to the right people and withdraw it everywhere
 
@@ -41,7 +41,7 @@ Out of scope for M1 (explicitly deferred): documents and the assistant (M2), cal
 3. **The RAG slice lands on top, not beside.** Transcripts produced here are the first knowledge; M2 adds document parsing, embeddings and answers using the same visibility predicate, so the leak-check tests written now also gate the assistant.
 4. **It needs no paid model spend.** Self-hosted whisper on T2 covers captions; the hosted ASR adapter is optional. The assistant (M2) is where provider keys and spend decisions start, and those are open questions for the user.
 5. **It settles the mobile architecture early** (separate Expo UI, shared contracts), as the user asked for native mobile from the start; the Expo app ships in M1b as read-and-react (sign in, feed, like, comment), upload stays on web until M10.
-6. **M1a depends on no open question**: privacy mode, mobile server discovery and moderation defaults only affect M1b.
+6. **M1a depends only on Q2 and Q6**, taken as the recommended defaults (both cheap to change); privacy mode (Q1), mobile server discovery (Q5) and moderation defaults (Q7) only affect M1b.
 
 ### M1a acceptance criteria (summary; full list in the scope brief)
 

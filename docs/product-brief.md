@@ -61,7 +61,7 @@ Large organizations drown in documents nobody reads and meetings nobody remember
 | Audit log | Who published, retracted, changed audience, exported, configured identity or model providers. | M5 |
 | Data residency and model policy | Per-org pinning of storage region and allowed model vendors/regions, require-ZDR switch, self-host-only mode. | M2 (policy), M9 (multi-region hosted) |
 | Offline and push on mobile | Field staff; push for pinned announcements and retractions. | M10 |
-| Content expiry | Time-boxed announcements should leave the feed automatically. | M3 |
+| Content expiry | Time-boxed announcements should leave the feed automatically. | M1a |
 
 Deferred unless the outcome requires them: live streaming, external (customer-facing) sharing, payments beyond hosted billing, a full LMS with SCORM, meeting recording bots.
 

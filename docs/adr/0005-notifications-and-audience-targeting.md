@@ -8,7 +8,7 @@ Publishing, pinning, retracting or replacing content must reach the right people
 
 ## Decision
 
-1. **Transactional outbox.** Every domain change writes a `domain_event` row (org, type, subject ids, version, actor, payload) in the same transaction. A pg-boss job drains the outbox; events are processed at least once with idempotency keys.
+1. **Transactional outbox.** Every domain change writes a `domain_event` row (org, type, subject ids, version, actor, payload) in the same transaction. A pg-boss job drains the outbox; events are processed at least once with idempotency keys. For scheduled publishing, the `content.published` row is written by the transition job at `publish_at` (ADR-0003), not at scheduling time, so audience resolution happens when the item is actually reader-visible.
 2. **Targeting rules** resolve an event to recipient sets, each with a `reason` code:
    - `audience`: users who can view the content now (visibility predicate, ADR-0002).
    - `saw_version`: users with a `view` or `ack` event on a specific version (from `user_content_state`).
