@@ -1,0 +1,93 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* Design tokens (packages/ui will own these from M1a). Contrast checked for WCAG 2.2 AA. */
+:root {
+  --color-bg: #f7f7f5;
+  --color-surface: #ffffff;
+  --color-text: #1b1c1a;
+  --color-muted: #55574f;
+  --color-accent: #1f6f5f;
+  --color-accent-contrast: #ffffff;
+  --color-border: #d9d9d3;
+  --color-focus: #b4530a;
+  --radius: 10px;
+  --space-1: 0.5rem;
+  --space-2: 1rem;
+  --space-3: 1.5rem;
+  --space-4: 2.5rem;
+  --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #121311;
+    --color-surface: #1c1e1b;
+    --color-text: #ededea;
+    --color-muted: #b4b6ae;
+    --color-accent: #6fcbb4;
+    --color-accent-contrast: #0b1a16;
+    --color-border: #33362f;
+    --color-focus: #ffb86b;
+  }
+}
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  line-height: 1.5;
+}
+a {
+  color: var(--color-accent);
+}
+:focus-visible {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 2px;
+}
+.skip-link {
+  position: absolute;
+  left: -999px;
+  top: 0;
+  background: var(--color-surface);
+  padding: var(--space-1) var(--space-2);
+  z-index: 10;
+}
+.skip-link:focus {
+  left: var(--space-2);
+  top: var(--space-2);
+}
+.page {
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: var(--space-3) var(--space-2) var(--space-4);
+}
+.masthead h1 {
+  margin: 0 0 var(--space-1);
+  font-size: 2rem;
+}
+.muted {
+  color: var(--color-muted);
+}
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-3);
+  margin-top: var(--space-3);
+}
+.footer {
+  margin-top: var(--space-4);
+  font-size: 0.9rem;
+  color: var(--color-muted);
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}

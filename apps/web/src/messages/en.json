@@ -1,0 +1,10 @@
+{
+  "app.name": "our-stream",
+  "app.tagline": "Knowledge streams for teams: short clips, the right audience, answers you can trust.",
+  "a11y.skipToContent": "Skip to content",
+  "status.heading": "Status",
+  "status.apiReachable": "API version {version} is reachable.",
+  "status.apiUnreachable": "The API is not reachable yet.",
+  "status.sourceLink": "Source code for this version",
+  "footer.source": "Source code (AGPL-3.0)"
+}

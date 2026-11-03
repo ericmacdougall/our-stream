@@ -12,12 +12,12 @@ Users must only ever see, search, retrieve or be answered from content they are 
 
 Authorization is stored as tuples `(org_id, object_type, object_id, relation, subject_type, subject_id)` in `relation_tuple`, shaped like OpenFGA/Zanzibar tuples so a later migration to an external engine would be mechanical.
 
-| object | relations | subjects |
-|---|---|---|
-| org | owner, admin, announcer, contributor, member | user |
-| group | member | user, group (nesting depth ≤ 4, cycles rejected at write time by walking the closure) |
-| stream | owner, moderator, contributor, viewer | user, group, `org#member` (everyone) |
-| content | owner, editor, viewer (direct grants) | user, group |
+| object  | relations                                    | subjects                                                                              |
+| ------- | -------------------------------------------- | ------------------------------------------------------------------------------------- |
+| org     | owner, admin, announcer, contributor, member | user                                                                                  |
+| group   | member                                       | user, group (nesting depth ≤ 4, cycles rejected at write time by walking the closure) |
+| stream  | owner, moderator, contributor, viewer        | user, group, `org#member` (everyone)                                                  |
+| content | owner, editor, viewer (direct grants)        | user, group                                                                           |
 
 Audience is expressed as tuples: publishing content "to stream S" writes `(content, C, viewer, stream, S#viewer)`; "to everyone" writes `(content, C, viewer, org, O#member)`; "to group G" writes `(content, C, viewer, group, G#member)`; "to user U" writes `(content, C, viewer, user, U)`.
 
@@ -27,7 +27,7 @@ Audience is expressed as tuples: publishing content "to stream S" writes `(conte
    - `content.org_id = :org` **and** `:user` has an active org membership in `:org` (`EXISTS` on `org_membership` with `status = 'active'`).
    - `content.state = 'published'` and `publish_at <= now()` and (`expires_at is null or expires_at > now()`) and `retracted_at is null`, evaluated against the current version.
    - An audience path exists: direct user tuple; a group the user is a (transitive) member of; a stream the user can view (directly, via group, or via `org#member`); or `org#member`.
-   Drafts, not-yet-published (future `publish_at`), expired and retracted items are **never** reader-visible to anyone, including their owner. The stored `state` enum is `draft | published | retracted`; "scheduled" and "expired" are derived from the timestamps, never stored, so visibility never depends on a job. Publishing always sets `publish_at` (now or the scheduled instant); `publish_at` is `NOT NULL` for published rows, so a missing value fails closed.
+     Drafts, not-yet-published (future `publish_at`), expired and retracted items are **never** reader-visible to anyone, including their owner. The stored `state` enum is `draft | published | retracted`; "scheduled" and "expired" are derived from the timestamps, never stored, so visibility never depends on a job. Publishing always sets `publish_at` (now or the scheduled instant); `publish_at` is `NOT NULL` for published rows, so a missing value fails closed.
 2. **`authorAccessible(user, content)`** is used only by editing, moderation, publishing, processing-status and version-history endpoints. It requires `content.org_id = :org` and an active membership of `:user` in `:org` (stated explicitly so the predicate holds with RLS deliberately off in tests). Then:
    - Drafts are accessible only to the owner, editors and org admins/owners until the author requests review; after a review request, moderators and owners of the streams in the draft's audience can access it.
    - Published items (whether not yet live, live, or expired by timestamp) and retracted items are accessible to the owner, editors, org admins/owners, and moderators/owners of streams in the audience; moderators see the audience entries for their own stream only, and private principals (direct users, private groups) and old versions are hidden from them and stay on the audited auditor path.

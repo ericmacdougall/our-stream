@@ -1,0 +1,7 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+
+# Isolated linker by default (research 2026-11-03: Expo 58 supports isolated installs;
+# switch to hoisted only if a native module fails).
+nodeLinker: isolated

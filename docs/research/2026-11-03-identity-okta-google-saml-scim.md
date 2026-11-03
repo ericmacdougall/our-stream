@@ -25,6 +25,7 @@ RFC 7644 https://www.rfc-editor.org/rfc/rfc7644.html (with RFC 7643, 7642) [V, h
 Entra requirements and quirks: https://learn.microsoft.com/en-us/entra/identity/app-provisioning/use-scim-to-provision-users-and-groups (2026-09-15) and https://learn.microsoft.com/en-us/entra/identity/app-provisioning/application-provisioning-config-problem-scim-compatibility (2025-08-25) [V, high]. See the Microsoft research note for details.
 
 Server design rules derived [I, medium-high]:
+
 1. Normalise `op` to lowercase; coerce `"True"`/`"False"` strings for `active`.
 2. Accept PATCH with and without `path`; accept both member-removal shapes.
 3. Implement `/Schemas`, `/ServiceProviderConfig`, `/ResourceTypes`; return 201 on create, 204 on delete, 409 on duplicate `userName` or `externalId`; `userName` matching case-insensitive.
