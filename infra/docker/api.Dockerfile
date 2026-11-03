@@ -19,7 +19,7 @@ COPY packages/db packages/db
 COPY packages/authz packages/authz
 COPY packages/contracts packages/contracts
 COPY apps/api apps/api
-RUN pnpm --filter @our-stream/api... build && pnpm --filter @our-stream/api... --prod deploy --legacy /out
+RUN pnpm --filter @our-stream/api... build && pnpm --filter @our-stream/api deploy --prod --legacy /out
 
 FROM node:24-bookworm-slim AS runtime
 ENV NODE_ENV=production

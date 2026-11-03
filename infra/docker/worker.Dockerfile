@@ -15,7 +15,7 @@ COPY tsconfig.base.json ./
 COPY packages/config packages/config
 COPY packages/db packages/db
 COPY apps/worker apps/worker
-RUN pnpm --filter @our-stream/worker... build && pnpm --filter @our-stream/worker... --prod deploy --legacy /out
+RUN pnpm --filter @our-stream/worker... build && pnpm --filter @our-stream/worker deploy --prod --legacy /out
 
 FROM node:24-bookworm-slim AS runtime
 ENV NODE_ENV=production

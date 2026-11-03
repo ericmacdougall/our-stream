@@ -47,7 +47,7 @@ services:
       - storage-data:/data
       - ./seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
     healthcheck:
-      test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1:8333/ || exit 1']
+      test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1:8333/; rc=$$?; [ $$rc -eq 0 ] || [ $$rc -eq 8 ]']
       interval: 5s
       timeout: 3s
       retries: 30
@@ -65,11 +65,12 @@ services:
     build:
       context: ../..
       dockerfile: infra/docker/api.Dockerfile
-    command: ['node', 'apps/api/dist/cli.js', 'migrate']
+    command: ['node', 'dist/cli.js', 'migrate']
     environment: &app-env
       NODE_ENV: development
       DATABASE_URL: postgres://ourstream_app:${APP_DB_PASSWORD:-ourstream-app-dev-only}@postgres:5432/ourstream
       DATABASE_ADMIN_URL: postgres://ourstream_admin:${POSTGRES_PASSWORD:-ourstream-dev-only}@postgres:5432/ourstream
+      DATABASE_PLATFORM_URL: postgres://ourstream_platform:${PLATFORM_DB_PASSWORD:-ourstream-platform-dev-only}@postgres:5432/ourstream
       S3_ENDPOINT: http://storage:8333
       S3_REGION: us-east-1
       S3_BUCKET: ourstream
