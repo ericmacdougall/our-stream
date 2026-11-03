@@ -26,13 +26,26 @@ Status: v0.1, 2026-11-03. Owner: our-stream task owner. Each risk names the cont
 | R20 | Secrets or private material committed | low / critical | gitleaks pre-commit and CI, synthetic fixtures only, review checklist | CI secret scan |
 | R21 | Mobile token storage and SSO on device | low / high | expo-secure-store, PKCE, no client secrets, short-lived access tokens, refresh rotation | Mobile auth tests |
 | R22 | Privacy of viewing data (managers seeing named viewers unexpectedly) | medium / medium | Org privacy modes with conservative default; transparency page for users | Privacy mode response-shape tests |
+| R23 | Deactivated user keeps access through a live session, refresh token or media token | medium / high | Active-membership check inside `readerVisible`; epoch and status read from DB per request; session and token revocation on deactivation; media re-authorised per request | Deactivate-then-request tests on feed, media, `/sync` |
+| R24 | Time-driven transitions (publish_at, expires_at) served stale from epoch-keyed caches | medium / medium | Scheduled epoch bump at the transition instant; 60 s time bucket in keys; TTL capped at next transition; SQL predicate checks timestamps | Fake-clock expiry test on cached feed |
+| R25 | Service worker or browser cache serves personalised data offline or after logout on a shared device | medium / high | `/api` and `/media` excluded from runtime caching; caches cleared on logout and epoch change; `no-store` on playlists and personalised responses | Playwright logout-then-back test; SW config test |
+| R26 | Existence oracles and side channels (duplicate detection, counts, facets, autocomplete, mentions, viewer lists, SSE broadcasts) | medium / high | All routed through `readerVisible`; dedupe scoped to uploader | Matrix cells for each side channel |
+| R27 | AGPL-3.0 and app-store terms conflict for the mobile app (VLC precedent) | medium / high | Decide before first external contribution (Q13): additional permission, separate license for `apps/mobile`, or CLA; §13 source link in UI | License decision recorded; CI header check |
+| R28 | Node runtime end of life (Node 22 EOL April 2027) | low / medium | Node 24 LTS baseline; Renovate for engine bumps | CI engines check |
+| R29 | ASR hallucinated captions on silence or music; wrong-language transcripts | medium / medium | VAD gate before ASR, language detection with confidence, "captions auto-generated" label, easy caption editing | Fixture with silence and music yields empty or flagged captions |
+| R30 | Hosted service with open signup: abuse, illegal content, takedown duties | medium / high | Rate-limited signup with verification, abuse reporting, takedown workflow, hash-matching hook point, terms and DMCA/NetzDG contacts | Takedown runbook; abuse report flow test |
+| R31 | Key management: HMAC media keys, envelope keys for integration secrets, rotation | low / high | KMS or local master key with rotation procedure, key ids on every token/ciphertext, dual-key grace window | Rotation test with old and new key ids |
+| R32 | ffmpeg, parser and sidecar CVEs | medium / medium | Pinned images rebuilt weekly, Renovate, worker runs with no network and dropped capabilities, resource limits | Image scan in CI |
+| R33 | Restoring a single org from a shared backup; upgrade without backup | low / high | Per-org restore job into staging schema; backup hook before migrations (ADR-0012) | Monthly restore rehearsal in CI |
+| R34 | Self-host without SMTP: magic links and invites cannot be delivered | high / low | Password sign-in always available; admin can copy invite and magic links from the console; compose ships a local mail catcher | Compose smoke test without SMTP |
+| R35 | pgvector iterative scan cap returns fewer than k results for selective users | medium / low | Exact-scan fallback when `max_scan_tuples` is hit; per-org partial indexes for large orgs | Recall test with a selective user |
 
 ## Domain invariants
 
 1. A user sees content only through an audience path that exists at query time; there is no "cached permission" that outlives its epoch.
 2. Every derived artifact references exactly one content version; a version never changes after processing.
 3. Retracted or superseded versions are never used for feed, search, retrieval, media or export.
-4. Notifications never reveal content the recipient cannot currently view, except the title of an item they already saw.
+4. Notifications never reveal content the recipient cannot currently view; a notice about an item they previously saw is neutral by default and may include only the view-time title snapshot when the org opts in; deactivated users are never notified.
 5. Model calls receive only permitted chunks and never decide authorization.
 6. Org boundaries hold in every store: Postgres, object storage, caches, queues, logs, exports.
 

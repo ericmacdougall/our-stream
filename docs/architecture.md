@@ -79,11 +79,11 @@ Rule: `apps/*` never import each other; shared logic lives in `packages/*`. Inte
 
 ## Request path and authorization
 
-1. AuthN: session cookie (web) or bearer token (mobile, API) resolves to (org_id, user_id, roles, authz_epoch).
+1. AuthN: session cookie (web) or bearer token (mobile, API) resolves to (org_id, user_id); roles, membership status and `authz_epoch` are read from the database on every request, never carried in a token. Sessions and refresh tokens are revoked on deactivation. The Next.js app never talks to Postgres; it calls the API, which is the single authorization surface.
 2. Each request opens a transaction and sets `app.org_id` and `app.user_id`; Postgres RLS denies rows outside the org even if application code has a bug. The API database role cannot bypass RLS. See ADR-0001.
-3. Application-level authorization uses `packages/authz`: `canView(viewer, content)` for single items and `visibleContentIds(viewer)` / `visibilityPredicate(viewer)` for lists, feed and retrieval. All three are generated from the same rule set and covered by one fixture matrix. See ADR-0002.
-4. Retrieval: vector or keyword search is executed with the visibility predicate in the SQL `WHERE` clause (pgvector iterative scan) or against a precomputed permitted-content set when the set is small. A post-check asserts every returned chunk satisfies `canView`; a violation fails closed and is logged as a security event. See ADR-0002.
-5. Media: HLS playlists and segments are served only through signed URLs minted per (user, content_version) with short TTL; retraction revokes by version and key rotation. See ADR-0003 and ADR-0004.
+3. Application-level authorization uses `packages/authz` with two named predicates: `readerVisible(viewer, content)` for every reader path (feed, search including counts and facets, retrieval, media, notifications, exports, citations, viewer lists, autocomplete) and `authorAccessible` for editing and moderation endpoints only; an audited `auditorAccessible` path covers old versions. All are generated from one rule set and covered by one fixture matrix with an independent reference implementation. See ADR-0002.
+4. Retrieval: vector or keyword search is executed with `readerVisible` in the SQL `WHERE` clause (pgvector iterative scan with an exact-scan fallback) or against a precomputed permitted-content set when the set is small. A post-check asserts every returned chunk satisfies `readerVisible`; a violation fails closed and is logged as a security event. See ADR-0002.
+5. Media: HLS playlists, captions and every segment are served through an authenticated proxy route that re-authorises each request (active user, current version, `readerVisible`); native players receive a short-lived identity token in segment URLs but the server check is the authorization. See ADR-0003 and ADR-0004.
 
 ## Content pipeline
 

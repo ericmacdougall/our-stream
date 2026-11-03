@@ -15,11 +15,11 @@ Publishing, pinning, retracting or replacing content must reach the right people
    - `asked_related`: users whose logged questions had an answer citing that content version.
    - `pinned_for`: audience of a pinned announcement.
    - `commented`, `mentioned`, `moderation`.
-   Recipient resolution respects permissions at delivery time: a retraction notice goes to `saw_version` users even if they lost access (they need to know the old version is wrong), but the notice contains no content from the retracted item beyond its title; a "new version available" link only resolves if they still have access.
+   Recipient resolution respects permissions at delivery time. A retraction notice goes to `saw_version` and `asked_related` users who are still active members even if they lost access to the item (they need to know what they saw is wrong), but by default it is a **neutral notice** ("something you viewed on <date> has been withdrawn; contact <owner>"). The title is included only when the org enables `notify.include_title_after_access_loss`, and then only the **title snapshot recorded in `user_content_state` at view time**, never the current title (metadata edits do not create versions). Deactivated users are never notified. Moderator-written retraction reasons are never included in notices to users who lost access. A "new version available" link resolves only if the recipient passes `readerVisible` for the new version.
 3. **Notification record** per (user, event key) with `dedupe_key = sha256(org, user, type, subject, version)`; duplicates are dropped. Each record tracks channel deliveries and states (queued, sent, failed, read).
 4. **Channels** as adapters: in-app (always), email (SMTP or provider adapter), Teams bot proactive message (M6), Expo push (M10), webhook (generic, M3). Channel selection = org policy ∩ user preference ∩ event severity. `retraction` and `pinned_announcement` are "important" and bypass digests but not quiet hours unless the org marks them critical.
 5. **Digests.** Non-important events batch per user per channel on a schedule (default hourly in-app badge, daily email). Important events send immediately with rate limiting per user (max N per minute) and collapsing (one message listing several items).
-6. **Content of notifications is permission-checked at render time**, not at enqueue time: a notification pointing at content the user can no longer see renders as a neutral "an item you followed is no longer available" message.
+6. **Content of notifications is permission-checked at render time**, not at enqueue time: a notification pointing at content the user can no longer see renders as the neutral message in point 2 (plus the view-time title snapshot only under the org option). Comment-mention notifications are dropped when the mentioned user fails `readerVisible` for the item.
 7. **Preferences and compliance**: per-user channel and digest settings; org-level overrides for compliance notices; unsubscribe for email per category except mandatory compliance notices; everything audited.
 
 ## Consequences
@@ -32,5 +32,5 @@ Publishing, pinning, retracting or replacing content must reach the right people
 
 - Publish to a stream with nested groups: recipients equal the visibility predicate result (same fixture matrix as ADR-0002).
 - Retract after views: users who viewed v1 receive one retraction notice each, non-viewers in the audience receive the standard removal notice only if the org enables it, duplicates suppressed on replay of the outbox.
-- Lost access before delivery: rendered notification contains no content.
+- Lost access before delivery: rendered notification contains no content and, by default, no title; with the org option, only the view-time title snapshot. Deactivated users receive nothing. Mention of a non-viewer sends nothing.
 - Rate limit and digest timing with a fake clock.

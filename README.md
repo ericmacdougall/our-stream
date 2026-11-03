@@ -17,7 +17,7 @@ Status: pre-alpha. Architecture and roadmap are being defined; see `docs/`. Noth
 
 - `docs/product-brief.md`: outcome, actors, scope, principles.
 - `docs/architecture.md`: system map.
-- `docs/adr/`: architecture decision records (tenancy, permissions, pipeline, caching, notifications, analytics, integrations, model providers, scanning, prompt-injection, stack).
+- `docs/adr/`: architecture decision records (tenancy, permissions, pipeline, caching, notifications, analytics, integrations, model providers, scanning, prompt-injection, stack, rollout).
 - `docs/roadmap.md`: the first end-to-end slice and milestones.
 - `docs/risk-table.md`: risks, controls and proofs.
 - `docs/research/`: dated notes from official vendor documentation.
