@@ -25,6 +25,10 @@ const Env = z.object({
 
   // Object storage (S3 API; SeaweedFS in compose). Path-style addressing is the self-host default.
   S3_ENDPOINT: z.url().default('http://localhost:8333'),
+  // Browser-reachable storage endpoint used only to presign upload-part URLs (compose's internal
+  // http://storage:8333 cannot be resolved by a browser); defaults to S3_ENDPOINT. The infra owner routes
+  // it through the edge proxy; the bucket CORS allow-list is unaffected (it lists browser origins).
+  S3_PUBLIC_ENDPOINT: z.url().optional(),
   S3_REGION: z.string().min(1).default('us-east-1'),
   S3_BUCKET: z.string().min(1).default('ourstream'),
   S3_ACCESS_KEY: z.string().min(1).default('ourstream-dev'),
@@ -58,6 +62,13 @@ const Env = z.object({
   IP_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(600),
   SESSION_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(600),
   MEDIA_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(1200),
+  // M1b write budgets (per minute, by validated session id): likes/engagement/pins/tags/settings share
+  // WRITE; comments, search and share have their own so a flood on one cannot starve the others and the
+  // share oracle (ADR-0002 accepts telling the sharer) stays slow and audited.
+  WRITE_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(60),
+  COMMENT_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(10),
+  SEARCH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(60),
+  SHARE_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(20),
 });
 
 export type Config = z.infer<typeof Env>;

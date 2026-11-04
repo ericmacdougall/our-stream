@@ -1,0 +1,28 @@
+{
+  "name": "@our-stream/notifications",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --project unit",
+    "test:integration": "vitest run --project integration"
+  },
+  "dependencies": {
+    "nodemailer": "10.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "@types/nodemailer": "8.0.2",
+    "typescript": "5.9.3",
+    "vitest": "5.1.0"
+  }
+}

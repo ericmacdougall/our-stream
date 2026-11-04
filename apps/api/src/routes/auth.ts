@@ -5,11 +5,11 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import type { z } from 'zod';
 import {
-  AuthResponse,
+  AuthResponseM1b,
   LoginRequest,
   MagicLinkConsumeRequest,
   MagicLinkRequest,
-  Me,
+  MeM1b,
   Ok,
   SignupRequest,
   SetPasswordRequest,
@@ -29,6 +29,7 @@ import { ApiError, conflict, unauthorized } from '../lib/errors.js';
 import { magicLinkMail } from '../lib/mailer.js';
 import {
   accountByEmail,
+  accountHasPassword,
   accountSetPasswordIfUnset,
   accountCreate,
   accountGet,
@@ -70,9 +71,10 @@ export async function buildMe(
   sessionId: string,
   tokenHash: Buffer,
   orgId: string | null,
-): Promise<z.infer<typeof Me>> {
+): Promise<z.infer<typeof MeM1b>> {
   const account = await accountGet(ctx.pool, userId);
   if (!account) throw unauthorized();
+  const hasPassword = await accountHasPassword(ctx.pool, userId);
   const memberships = await membershipsOfSession(ctx.pool, tokenHash);
   const current = orgId
     ? memberships.find((m) => m.orgId === orgId && m.status === 'active')
@@ -84,6 +86,7 @@ export async function buildMe(
       : null,
     memberships,
     csrfToken: csrfToken(ctx.config, sessionId),
+    hasPassword,
   };
 }
 
@@ -106,10 +109,12 @@ async function signedIn(
   req: FastifyRequest,
   reply: FastifyReply,
   s: { token: string; sessionId: string; userId: string; orgId: string | null },
-): Promise<z.infer<typeof AuthResponse>> {
-  setSessionCookie(reply, ctx.config, s.token);
-  const me = await buildMe(ctx, s.userId, s.sessionId, sha256(s.token), s.orgId);
+): Promise<z.infer<typeof AuthResponseM1b>> {
+  // One copy of the credential per client: native clients asked for the token in the body and must
+  // not also receive the cookie; web clients get the cookie only (mobile owner review).
   const wantsBearer = req.headers[TRANSPORT_HEADER] === 'bearer';
+  if (!wantsBearer) setSessionCookie(reply, ctx.config, s.token);
+  const me = await buildMe(ctx, s.userId, s.sessionId, sha256(s.token), s.orgId);
   return wantsBearer ? { ...me, sessionToken: s.token } : me;
 }
 
@@ -133,7 +138,7 @@ export function registerAuthRoutes(fastify: FastifyInstance, ctx: AppContext): v
     '/v1/auth/signup',
     {
       config: authLimit,
-      schema: { tags: ['auth'], body: SignupRequest, response: { 200: AuthResponse } },
+      schema: { tags: ['auth'], body: SignupRequest, response: { 200: AuthResponseM1b } },
     },
     async (req, reply) => {
       const body = req.body;
@@ -189,7 +194,7 @@ export function registerAuthRoutes(fastify: FastifyInstance, ctx: AppContext): v
     '/v1/auth/login',
     {
       config: authLimit,
-      schema: { tags: ['auth'], body: LoginRequest, response: { 200: AuthResponse } },
+      schema: { tags: ['auth'], body: LoginRequest, response: { 200: AuthResponseM1b } },
     },
     async (req, reply) => {
       // Login charges the per-email budget only on failure, so a flood of wrong passwords cannot be
@@ -263,7 +268,7 @@ export function registerAuthRoutes(fastify: FastifyInstance, ctx: AppContext): v
     '/v1/auth/magic-link/consume',
     {
       config: authLimit,
-      schema: { tags: ['auth'], body: MagicLinkConsumeRequest, response: { 200: AuthResponse } },
+      schema: { tags: ['auth'], body: MagicLinkConsumeRequest, response: { 200: AuthResponseM1b } },
     },
     async (req, reply) => {
       const token = newSessionToken();
@@ -315,7 +320,7 @@ export function registerAuthRoutes(fastify: FastifyInstance, ctx: AppContext): v
     {
       schema: {
         tags: ['auth'],
-        response: { 200: Me },
+        response: { 200: MeM1b },
         security: [{ cookieAuth: [] }, { bearerAuth: [] }],
       },
     },
@@ -332,7 +337,7 @@ export function registerAuthRoutes(fastify: FastifyInstance, ctx: AppContext): v
       schema: {
         tags: ['auth'],
         body: SwitchOrgRequest,
-        response: { 200: Me },
+        response: { 200: MeM1b },
         security: [{ cookieAuth: [] }, { bearerAuth: [] }],
       },
     },
@@ -347,9 +352,20 @@ export function registerAuthRoutes(fastify: FastifyInstance, ctx: AppContext): v
   // mailbox control (the invite link). Accounts that already have a password are refused.
   app.post(
     '/v1/auth/password',
-    { schema: { tags: ['auth'], body: SetPasswordRequest, response: { 200: Ok } } },
+    {
+      schema: {
+        tags: ['auth'],
+        body: SetPasswordRequest,
+        response: { 200: Ok },
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
+      },
+    },
     async (req) => {
       const auth = requireUser(req);
+      // Cheap read first so a 409 never costs an argon2 hash (web owner review); the definer function
+      // still decides atomically.
+      if (await accountHasPassword(ctx.pool, auth.userId))
+        throw conflict('password_set', 'this account already has a password');
       const passwordHash = await argon2.hash(req.body.password, ARGON2_OPTIONS);
       const ok = await withPlatform(ctx.pool, (client) =>
         accountSetPasswordIfUnset(client, auth.userId, passwordHash),
