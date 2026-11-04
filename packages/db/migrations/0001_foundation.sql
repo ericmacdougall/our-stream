@@ -253,7 +253,6 @@ CREATE OR REPLACE FUNCTION org_create_epoch_seq() RETURNS trigger LANGUAGE plpgs
 BEGIN
   IF NEW.org_id IS NULL THEN RAISE EXCEPTION 'org_create_epoch_seq: org required'; END IF;
   EXECUTE format('CREATE SEQUENCE IF NOT EXISTS %s START 1', org_epoch_seq_name(NEW.id));
-  EXECUTE format('GRANT USAGE, SELECT ON SEQUENCE %s TO ourstream_app', org_epoch_seq_name(NEW.id));
   RETURN NEW;
 END $$;
 CREATE TRIGGER org_create_epoch_seq AFTER INSERT ON org FOR EACH ROW EXECUTE FUNCTION org_create_epoch_seq();
@@ -284,11 +283,13 @@ BEGIN
 END $$;
 CREATE TRIGGER org_drop_epoch_seq AFTER DELETE ON org FOR EACH ROW EXECUTE FUNCTION org_drop_epoch_seq();
 
-CREATE OR REPLACE FUNCTION current_org_content_epoch(p_org uuid) RETURNS bigint LANGUAGE plpgsql STABLE AS $$
+CREATE OR REPLACE FUNCTION current_org_content_epoch(p_org uuid) RETURNS bigint LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, platform AS $$
 DECLARE v bigint;
 BEGIN
   IF p_org IS NULL OR p_org <> app_org() THEN RAISE EXCEPTION 'org context mismatch'; END IF;
-  EXECUTE format('SELECT last_value FROM %s', org_epoch_seq_name(p_org)) INTO v;
+  -- A fresh sequence reports last_value = 1 with is_called = false; report 0 until the first advance so the
+  -- first content change is visible to epoch-keyed caches (ADR-0004).
+  EXECUTE format('SELECT CASE WHEN is_called THEN last_value ELSE 0 END FROM %s', org_epoch_seq_name(p_org)) INTO v;
   RETURN v;
 END $$;
 
@@ -332,7 +333,13 @@ CREATE OR REPLACE FUNCTION authz_rebuild_user(p_org uuid, p_user uuid) RETURNS v
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, platform AS $$
 BEGIN
   IF p_org IS NULL THEN RAISE EXCEPTION 'authz_rebuild_user: org required'; END IF;
+  PERFORM pg_advisory_xact_lock(hashtext('authz:' || p_org::text), hashtext(p_user::text));
   DELETE FROM user_group_membership WHERE org_id = p_org AND user_id = p_user;
+  IF NOT EXISTS (SELECT 1 FROM org_membership m WHERE m.org_id = p_org AND m.user_id = p_user AND m.status = 'active') THEN
+    -- Deactivated or unknown members never hold derived access rows (ADR-0002 synchronous revocation).
+    DELETE FROM user_stream_access WHERE org_id = p_org AND user_id = p_user;
+    RETURN;
+  END IF;
   INSERT INTO user_group_membership (org_id, user_id, group_id)
     SELECT p_org, p_user, g FROM authz_groups_of_user(p_org, p_user) g;
 
@@ -384,7 +391,7 @@ BEGIN
     UNION
     SELECT authz_users_in_group(p_org, t.subject_id) FROM relation_tuple t WHERE t.org_id = p_org AND t.object_type = 'stream' AND t.object_id = p_stream AND t.subject_type = 'group'
     UNION
-    SELECT m.user_id FROM org_membership m WHERE m.org_id = p_org AND EXISTS (
+    SELECT m.user_id FROM org_membership m WHERE m.org_id = p_org AND m.status = 'active' AND EXISTS (
       SELECT 1 FROM relation_tuple t WHERE t.org_id = p_org AND t.object_type = 'stream' AND t.object_id = p_stream AND t.subject_type = 'org')
   LOOP
     PERFORM authz_rebuild_user(p_org, u);
@@ -401,7 +408,9 @@ BEGIN
       CASE t.subject_type WHEN 'org' THEN 'org'::audience_kind WHEN 'user' THEN 'user' WHEN 'group' THEN 'group' WHEN 'stream' THEN 'stream' END,
       t.subject_id
     FROM relation_tuple t
-    WHERE t.org_id = p_org AND t.object_type = 'content' AND t.object_id = p_content AND t.relation = 'viewer';
+    WHERE t.org_id = p_org AND t.object_type = 'content' AND t.object_id = p_content AND t.relation = 'viewer'
+      AND ((t.subject_type = 'org' AND t.subject_relation = 'member') OR (t.subject_type = 'stream' AND t.subject_relation = 'viewer')
+           OR (t.subject_type IN ('user', 'group') AND t.subject_relation = ''));
   UPDATE content SET content_epoch = content_epoch + 1, updated_at = now() WHERE org_id = p_org AND id = p_content;
   PERFORM org_epoch_advance(p_org);
 END $$;
@@ -412,6 +421,7 @@ DECLARE r relation_tuple;
 BEGIN
   r := COALESCE(NEW, OLD);
   IF r.org_id IS NULL THEN RAISE EXCEPTION 'relation_tuple_changed: org required'; END IF;
+  PERFORM pg_advisory_xact_lock(hashtext('authz:' || r.org_id::text));
   IF r.object_type = 'group' THEN
     PERFORM authz_rebuild_group(r.org_id, r.object_id);
     IF r.subject_type = 'user' THEN PERFORM authz_rebuild_user(r.org_id, r.subject_id); END IF;
@@ -455,6 +465,18 @@ BEGIN
 END $$;
 CREATE TRIGGER org_membership_activated AFTER INSERT OR UPDATE ON org_membership
   FOR EACH ROW EXECUTE FUNCTION org_membership_activated();
+
+CREATE OR REPLACE FUNCTION org_membership_deleted() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, platform AS $$
+BEGIN
+  IF OLD.org_id IS NULL THEN RAISE EXCEPTION 'org_membership_deleted: org required'; END IF;
+  DELETE FROM user_stream_access WHERE org_id = OLD.org_id AND user_id = OLD.user_id;
+  DELETE FROM user_group_membership WHERE org_id = OLD.org_id AND user_id = OLD.user_id;
+  UPDATE platform.session SET revoked_at = now() WHERE user_id = OLD.user_id AND org_id = OLD.org_id AND revoked_at IS NULL;
+  RETURN NULL;
+END $$;
+CREATE TRIGGER org_membership_deleted AFTER DELETE ON org_membership
+  FOR EACH ROW EXECUTE FUNCTION org_membership_deleted();
 
 -- Content state changes bump epochs (ADR-0004).
 CREATE OR REPLACE FUNCTION content_changed() RETURNS trigger
@@ -508,17 +530,33 @@ BEGIN
 END $$;
 
 -- org rows are readable by members; creation of an org happens through a definer function in the API layer (M1a).
+-- Outbox writes go through a definer function bound to the caller's tenant context (ADR-0005); the app
+-- role has no direct privileges on platform tables. Account and session access arrives with M1a through
+-- definer functions as well.
+CREATE OR REPLACE FUNCTION platform_emit_event(p_type text, p_subject_type text, p_subject_id uuid, p_version_id uuid, p_payload jsonb)
+RETURNS bigint LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, platform AS $$
+DECLARE v_org uuid := app_org(); v_id bigint;
+BEGIN
+  IF v_org IS NULL THEN RAISE EXCEPTION 'platform_emit_event: org context required'; END IF;
+  INSERT INTO platform.domain_event (org_id, type, subject_type, subject_id, version_id, actor_id, payload)
+    VALUES (v_org, p_type, p_subject_type, p_subject_id, p_version_id, app_user(), COALESCE(p_payload, '{}'::jsonb))
+    RETURNING id INTO v_id;
+  RETURN v_id;
+END $$;
+REVOKE EXECUTE ON FUNCTION platform_emit_event(text, text, uuid, uuid, jsonb) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION platform_emit_event(text, text, uuid, uuid, jsonb) TO ourstream_app;
+
 GRANT USAGE ON SCHEMA platform TO ourstream_app, ourstream_platform;
-GRANT SELECT, INSERT, UPDATE ON platform.user_account TO ourstream_app;
-GRANT SELECT, INSERT, UPDATE ON platform.session TO ourstream_app;
-GRANT INSERT ON platform.domain_event TO ourstream_app;
-GRANT USAGE, SELECT ON SEQUENCE platform.domain_event_id_seq TO ourstream_app;
 GRANT SELECT, UPDATE ON platform.domain_event TO ourstream_platform;
-GRANT SELECT ON platform.schema_migration TO ourstream_app, ourstream_platform;
+GRANT SELECT ON platform.schema_migration TO ourstream_platform;
 GRANT USAGE ON SCHEMA public TO ourstream_app, ourstream_platform;
+-- Fixed search paths so no role can shadow public tables through a "$user" schema (F6).
+ALTER ROLE ourstream_app SET search_path = public, pg_catalog;
+ALTER ROLE ourstream_platform SET search_path = public, pg_catalog;
 REVOKE EXECUTE ON FUNCTION org_epoch_advance(uuid), authz_rebuild_user(uuid, uuid), authz_rebuild_group(uuid, uuid),
   authz_rebuild_stream(uuid, uuid), content_audience_sync(uuid, uuid), org_create_epoch_seq(), org_drop_epoch_seq(),
-  relation_tuple_changed(), org_membership_changed(), org_membership_activated(), content_changed(), content_changed_after() FROM PUBLIC;
+  relation_tuple_changed(), org_membership_changed(), org_membership_activated(), org_membership_deleted(), content_changed(), content_changed_after() FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION next_org_content_epoch(uuid), current_org_content_epoch(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app_org(), app_user(), next_org_content_epoch(uuid), current_org_content_epoch(uuid), authz_users_in_group(uuid, uuid), authz_groups_of_user(uuid, uuid) TO ourstream_app;
 GRANT USAGE, SELECT ON SEQUENCE audit_event_id_seq TO ourstream_app;
-GRANT CREATE ON DATABASE ourstream TO ourstream_platform;   -- pg-boss creates its own schema
+CREATE SCHEMA IF NOT EXISTS pgboss AUTHORIZATION ourstream_platform;   -- pg-boss owns its schema; no CREATE on the database

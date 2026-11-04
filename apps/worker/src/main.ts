@@ -6,9 +6,9 @@ import { handlers, type JobContext } from './jobs.js';
 
 const log = pino({ level: process.env['LOG_LEVEL'] ?? 'info', redact: ['*.password', '*.token'] });
 const tenantUrl = process.env['DATABASE_URL'];
-const platformUrl = process.env['DATABASE_PLATFORM_URL'] ?? process.env['DATABASE_ADMIN_URL'];
+const platformUrl = process.env['DATABASE_PLATFORM_URL']; // never the admin role (code-inspection F3)
 if (!tenantUrl || !platformUrl) {
-  log.error('DATABASE_URL and DATABASE_PLATFORM_URL (or DATABASE_ADMIN_URL) are required');
+  log.error('DATABASE_URL and DATABASE_PLATFORM_URL are required');
   process.exit(2);
 }
 

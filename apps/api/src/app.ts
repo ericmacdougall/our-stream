@@ -18,6 +18,12 @@ import type pg from 'pg';
 import { HealthResponse, MetaResponse, type ErrorResponse } from '@our-stream/contracts';
 import type { Config } from './config.js';
 
+function parseTrustProxy(v: string): boolean | string {
+  if (v === 'true') return true;
+  if (v === 'false' || v === '') return false;
+  return v;
+}
+
 export interface AppDeps {
   config: Config;
   pool: pg.Pool | null;
@@ -29,10 +35,18 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     logger: {
       level: deps.config.LOG_LEVEL,
       // Redact anything that could carry credentials or content (risk R16).
-      redact: ['req.headers.authorization', 'req.headers.cookie', 'res.headers["set-cookie"]'],
+      redact: [
+        'req.headers.authorization',
+        'req.headers.cookie',
+        'res.headers["set-cookie"]',
+        'err.detail',
+        'err.hint',
+        'err.internalQuery',
+        'err.where',
+      ],
     },
     requestIdHeader: 'x-request-id',
-    trustProxy: true,
+    trustProxy: parseTrustProxy(deps.config.TRUST_PROXY),
     bodyLimit: 1024 * 1024,
   }).withTypeProvider<ZodTypeProvider>();
 

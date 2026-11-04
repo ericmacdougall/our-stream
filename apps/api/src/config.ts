@@ -9,6 +9,8 @@ const Env = z.object({
   APP_BASE_URL: z.url().default('http://localhost:3000'),
   SOURCE_URL: z.url().default('https://github.com/ericmacdougall/our-stream'),
   GIT_COMMIT: z.string().default('unknown'),
+  // Trust X-Forwarded-* only when a reverse proxy is in front (comma-separated hops/CIDRs, or 'true').
+  TRUST_PROXY: z.string().default('false'),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error']).default('info'),
 });
 

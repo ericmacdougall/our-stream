@@ -58,8 +58,8 @@ async function seedOrg(admin: pg.Client, org: FixtureOrg, users: Record<string, 
       ],
     );
     const v = await admin.query<{ id: string }>(
-      `INSERT INTO content_version (org_id, content_id, status) VALUES ($1, $2, 'current') RETURNING id`,
-      [org.orgId, c.id],
+      `INSERT INTO content_version (org_id, content_id, status) VALUES ($1, $2, $3) RETURNING id`,
+      [org.orgId, c.id, c.state === 'retracted' ? 'retracted' : 'current'],
     );
     await admin.query('UPDATE content SET current_version_id = $3 WHERE org_id = $1 AND id = $2', [
       org.orgId,

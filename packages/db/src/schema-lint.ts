@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Schema lint (ADR-0001): every tenant table has org_id, RLS enabled and forced, a policy with both
-// USING and WITH CHECK; every trigger/definer function in public filters by org (static check on
-// source for an org guard); no materialised views in the tenant schema; app role has no BYPASSRLS.
+// Schema lint (ADR-0001, ADR-0012): every tenant table (including partitioned parents) has org_id, RLS
+// enabled and forced, a policy with USING and WITH CHECK on app_org(); every trigger/definer function
+// carries an explicit org guard and definer functions pin search_path; no materialised views in the
+// tenant schema; the app role cannot bypass RLS, owns nothing, has no privileges on platform tables or
+// per-org sequences, and cannot execute maintenance functions.
 import pg from 'pg';
 
 export interface LintFinding {
@@ -9,7 +11,17 @@ export interface LintFinding {
   problem: string;
 }
 
-const PLATFORM_ONLY_TABLES = new Set<string>([]);
+const APP_ALLOWED_PLATFORM_OBJECTS = new Set<string>([]);
+const APP_ALLOWED_FUNCTIONS = new Set([
+  'app_org',
+  'app_user',
+  'next_org_content_epoch',
+  'current_org_content_epoch',
+  'authz_users_in_group',
+  'authz_groups_of_user',
+  'platform_emit_event',
+  'org_epoch_seq_name',
+]);
 
 export async function lintSchema(
   adminUrl: string,
@@ -26,10 +38,9 @@ export async function lintSchema(
     }>(
       `SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity
        FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-       WHERE n.nspname = 'public' AND c.relkind = 'r' ORDER BY c.relname`,
+       WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') ORDER BY c.relname`,
     );
     for (const t of tables.rows) {
-      if (PLATFORM_ONLY_TABLES.has(t.relname)) continue;
       const cols = await client.query<{ column_name: string }>(
         `SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1`,
         [t.relname],
@@ -74,36 +85,91 @@ export async function lintSchema(
         problem: 'materialised view in tenant schema (cannot carry RLS)',
       });
 
-    const fns = await client.query<{ proname: string; prosrc: string; prosecdef: boolean }>(
-      `SELECT p.proname, p.prosrc, p.prosecdef FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-       WHERE n.nspname = 'public' AND p.prokind = 'f' AND (p.prosecdef OR p.prorettype = 'trigger'::regtype)`,
+    const fns = await client.query<{
+      proname: string;
+      prosrc: string;
+      prosecdef: boolean;
+      proconfig: string[] | null;
+      is_trigger: boolean;
+    }>(
+      `SELECT p.proname, p.prosrc, p.prosecdef, p.proconfig, p.prorettype = 'trigger'::regtype AS is_trigger
+       FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = 'public' AND p.prokind = 'f' AND (p.prosecdef OR p.prorettype = 'trigger'::regtype)
+         AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e')`,
     );
     for (const f of fns.rows) {
-      const guarded =
-        /org_id\s+IS\s+NULL|p_org\s+IS\s+NULL|org required|org context mismatch/i.test(f.prosrc);
+      // Guard detection is textual by design: it enforces that every such function states its org
+      // precondition explicitly; the fixture matrix proves the behaviour.
+      const guarded = /RAISE EXCEPTION '[^']*org (required|context)/i.test(f.prosrc);
       if (!guarded)
         findings.push({
           object: f.proname,
-          problem: 'trigger/definer function has no explicit org guard',
+          problem:
+            'trigger/definer function has no explicit org guard (RAISE EXCEPTION ... org required)',
         });
+      if (f.prosecdef && !(f.proconfig ?? []).some((c) => c.startsWith('search_path='))) {
+        findings.push({
+          object: f.proname,
+          problem: 'SECURITY DEFINER function does not pin search_path',
+        });
+      }
     }
 
-    const role = await client.query<{ rolbypassrls: boolean; rolsuper: boolean }>(
-      `SELECT rolbypassrls, rolsuper FROM pg_roles WHERE rolname = $1`,
+    const role = await client.query<{
+      rolbypassrls: boolean;
+      rolsuper: boolean;
+      rolcreatedb: boolean;
+      rolcreaterole: boolean;
+    }>(
+      `SELECT rolbypassrls, rolsuper, rolcreatedb, rolcreaterole FROM pg_roles WHERE rolname = $1`,
       [appRole],
     );
     const r = role.rows[0];
     if (!r) findings.push({ object: appRole, problem: 'application role does not exist' });
-    else if (r.rolbypassrls || r.rolsuper)
-      findings.push({ object: appRole, problem: 'application role can bypass RLS' });
+    else if (r.rolbypassrls || r.rolsuper || r.rolcreatedb || r.rolcreaterole)
+      findings.push({ object: appRole, problem: 'application role has elevated attributes' });
 
     const owned = await client.query<{ relname: string }>(
       `SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace JOIN pg_roles r ON r.oid = c.relowner
-       WHERE n.nspname = 'public' AND c.relkind = 'r' AND r.rolname = $1`,
+       WHERE n.nspname IN ('public', 'platform') AND c.relkind IN ('r', 'p', 'S', 'v', 'm') AND r.rolname = $1`,
       [appRole],
     );
     for (const o of owned.rows)
-      findings.push({ object: o.relname, problem: 'tenant table owned by the application role' });
+      findings.push({ object: o.relname, problem: 'object owned by the application role' });
+
+    // Platform schema: the app role gets no table or sequence privileges there (definer functions mediate).
+    const platformPrivs = await client.query<{ relname: string; relkind: string }>(
+      `SELECT c.relname, c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+       WHERE n.nspname = 'platform' AND c.relkind IN ('r', 'p', 'S', 'v')
+         AND (
+           (c.relkind IN ('r','p','v') AND (has_table_privilege($1, c.oid, 'SELECT') OR has_table_privilege($1, c.oid, 'INSERT')
+             OR has_table_privilege($1, c.oid, 'UPDATE') OR has_table_privilege($1, c.oid, 'DELETE')))
+           OR (c.relkind = 'S' AND (has_sequence_privilege($1, c.oid, 'SELECT') OR has_sequence_privilege($1, c.oid, 'USAGE') OR has_sequence_privilege($1, c.oid, 'UPDATE')))
+         )`,
+      [appRole],
+    );
+    for (const p of platformPrivs.rows) {
+      if (!APP_ALLOWED_PLATFORM_OBJECTS.has(p.relname))
+        findings.push({
+          object: `platform.${p.relname}`,
+          problem: 'application role has direct privileges on a platform object',
+        });
+    }
+
+    // Function execution: the app role may execute only the allow-listed public functions.
+    const execs = await client.query<{ proname: string }>(
+      `SELECT DISTINCT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = 'public' AND p.prokind = 'f' AND has_function_privilege($1, p.oid, 'EXECUTE')
+         AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e')`,
+      [appRole],
+    );
+    for (const e of execs.rows) {
+      if (!APP_ALLOWED_FUNCTIONS.has(e.proname))
+        findings.push({
+          object: e.proname,
+          problem: 'application role can execute a function outside the allow-list',
+        });
+    }
   } finally {
     await client.end();
   }

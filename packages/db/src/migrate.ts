@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Forward-only SQL migration runner (ADR-0012). Each file in migrations/ runs once, in order,
-// inside a transaction, as the migration (owner) role. Checksums guard against edited history.
+// Forward-only SQL migration runner (ADR-0012). All pending files run in one transaction, in order, as
+// the migration (owner) role; checksums guard against edited history; an advisory lock serialises
+// concurrent runners including first-time bootstrap; files may not contain transaction control.
 import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -15,6 +16,9 @@ export interface MigrationResult {
   skipped: string[];
 }
 
+const TXN_CONTROL = /^\s*(BEGIN|COMMIT|ROLLBACK|START\s+TRANSACTION|END)\b/im;
+const LOCK_KEY = 7_201_262_001; // arbitrary, stable: "our-stream migrations"
+
 export async function runMigrations(
   adminUrl: string,
   dir = migrationsDir,
@@ -24,15 +28,13 @@ export async function runMigrations(
   const applied: string[] = [];
   const skipped: string[] = [];
   try {
-    await client.query('CREATE SCHEMA IF NOT EXISTS platform');
-    await client.query(
-      'CREATE TABLE IF NOT EXISTS platform.schema_migration (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now(), checksum text NOT NULL)',
-    );
-    // One transaction for the whole run: the lock serialises concurrent runners (compose migrate job,
-    // Helm hook) and any failure rolls back every pending file together.
     await client.query('BEGIN');
     try {
-      await client.query('LOCK TABLE platform.schema_migration IN ACCESS EXCLUSIVE MODE');
+      await client.query('SELECT pg_advisory_xact_lock($1)', [LOCK_KEY]);
+      await client.query('CREATE SCHEMA IF NOT EXISTS platform');
+      await client.query(
+        'CREATE TABLE IF NOT EXISTS platform.schema_migration (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now(), checksum text NOT NULL)',
+      );
       const done = await client.query<{ name: string; checksum: string }>(
         'SELECT name, checksum FROM platform.schema_migration',
       );
@@ -51,6 +53,12 @@ export async function runMigrations(
             );
           skipped.push(file);
           continue;
+        }
+        // Function bodies are dollar-quoted and legitimately contain BEGIN/END; only top-level statements count.
+        if (TXN_CONTROL.test(sql.replace(/\$[A-Za-z_]*\$[\s\S]*?\$[A-Za-z_]*\$/g, ''))) {
+          throw new Error(
+            `migration ${file} contains transaction control; the runner owns the transaction`,
+          );
         }
         try {
           await client.query(sql);

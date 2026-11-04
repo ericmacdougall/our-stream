@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Request-scoped tenant context (ADR-0001). Every tenant query runs inside withTenant(), which opens
-// a transaction and sets app.org_id / app.user_id with SET LOCAL (safe behind transaction pooling).
-// Raw pool access outside this helper is a programming error; the pool wrapper refuses tenant tables.
+// a transaction and sets app.org_id / app.user_id with transaction-scoped set_config (safe behind
+// transaction pooling). Raw pool access outside this helper is a programming error; a lint rule and
+// runtime guard for that are tracked for M1a (not yet implemented).
 import pg from 'pg';
 
 export interface TenantContext {
@@ -23,8 +24,9 @@ export function createPool(
 }
 
 /**
- * Runs `fn` inside a transaction with the tenant context set. The org id must be a UUID; a missing
- * org fails before any query runs. Nested calls with a different org are refused.
+ * Runs `fn` inside a transaction with the tenant context set. Both ids are validated as UUIDs before
+ * any query runs, so the literal interpolation below cannot carry anything else. On any failure the
+ * transaction is rolled back; if the rollback itself fails the connection is destroyed, never reused.
  */
 export async function withTenant<T>(
   pool: pg.Pool,
@@ -36,13 +38,15 @@ export async function withTenant<T>(
   if (ctx.userId !== null && !UUID_RE.test(ctx.userId))
     throw new TenantContextError('withTenant: userId must be a UUID or null');
   const client = await pool.connect();
+  let destroy = false;
   try {
     await client.query(`BEGIN ISOLATION LEVEL ${opts.isolation ?? 'READ COMMITTED'}`);
-    // SET LOCAL does not accept bind parameters; values are validated UUIDs or empty.
     await client.query(
       `SELECT set_config('app.org_id', '${ctx.orgId}', true), set_config('app.user_id', '${ctx.userId ?? ''}', true)`,
     );
-    const tenantClient = Object.assign(client, { tenant: ctx }) as TenantClient;
+    const tenantClient = Object.assign(client, {
+      tenant: Object.freeze({ ...ctx }),
+    }) as TenantClient;
     const result = await fn(tenantClient);
     await client.query('COMMIT');
     return result;
@@ -50,15 +54,20 @@ export async function withTenant<T>(
     try {
       await client.query('ROLLBACK');
     } catch {
-      // connection may already be broken; release below
+      destroy = true;
     }
     throw err;
   } finally {
-    client.release();
+    Reflect.deleteProperty(client, 'tenant'); // never leak the context to the next pool user
+    client.release(destroy ? new Error('connection discarded after failed rollback') : undefined);
   }
 }
 
-/** Reads the caller's current epochs inside the tenant transaction (ADR-0004 key-read ordering). */
+/**
+ * Reads the caller's epochs inside the tenant transaction. Callers must read these before the query
+ * they key (ADR-0004 key-read ordering invariant) under the default READ COMMITTED isolation: sequence
+ * reads are not MVCC, so under REPEATABLE READ the epoch could be newer than the snapshot the query sees.
+ */
 export async function readEpochs(
   client: TenantClient,
 ): Promise<{ authzEpoch: number; orgContentEpoch: number; active: boolean }> {

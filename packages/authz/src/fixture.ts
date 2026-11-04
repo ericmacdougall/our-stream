@@ -238,7 +238,8 @@ export function buildOrg(slug: string, userIds: FixtureUsers): FixtureOrg {
 }
 
 /** Two orgs sharing the same user accounts (overlapping emails) so cross-org leaks are testable. */
-export function buildFixture(): { users: FixtureUsers; orgs: [FixtureOrg, FixtureOrg] } {
+/** `suffix` keeps concurrently running suites from sharing org slugs. */
+export function buildFixture(suffix = ''): { users: FixtureUsers; orgs: [FixtureOrg, FixtureOrg] } {
   const users = Object.fromEntries(USER_NAMES.map((n) => [n, randomUUID()])) as FixtureUsers;
-  return { users, orgs: [buildOrg('acme', users), buildOrg('globex', users)] };
+  return { users, orgs: [buildOrg(`acme${suffix}`, users), buildOrg(`globex${suffix}`, users)] };
 }
