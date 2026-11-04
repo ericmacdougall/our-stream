@@ -9,10 +9,13 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev": "tsx watch src/main.ts",
     "start": "node dist/main.js",
-    "test": "vitest run"
+    "test": "vitest run --project unit",
+    "test:integration": "vitest run --project integration"
   },
   "dependencies": {
     "@our-stream/db": "workspace:*",
+    "@our-stream/pipeline": "workspace:*",
+    "@our-stream/providers": "workspace:*",
     "pg": "8.23.1",
     "pg-boss": "12.38.0",
     "pino": "10.4.0",

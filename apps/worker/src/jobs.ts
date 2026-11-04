@@ -1,44 +1,47 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Job registry. Every tenant job carries org_id and runs inside withTenant (ADR-0001 §1c).
-// Platform jobs (outbox drain) run under the platform role and only dispatch per-org work.
+// Platform jobs run under the platform role and reach tenant rows only through the platform_* definer
+// functions of migrations 0002/0003 with an explicit org id; the worker never holds a tenant context.
 import type pg from 'pg';
 import { withTenant } from '@our-stream/db';
+import type { ObjectStore, PipelineLimits } from '@our-stream/pipeline';
+import type { AsrProvider } from '@our-stream/providers';
 import { z } from 'zod';
+import { outboxDrain } from './outbox.js';
+import { mediaProcess } from './media.js';
+import { contentTransition } from './transition.js';
 
 export const TenantJob = z.object({ orgId: z.uuid() });
+
+export interface Logger {
+  info: (o: object, msg?: string) => void;
+  warn: (o: object, msg?: string) => void;
+  error: (o: object, msg?: string) => void;
+}
+
+/** The subset of pg-boss the handlers use, so tests can record sends. */
+export interface JobQueue {
+  send(
+    name: string,
+    data: object,
+    options: { singletonKey: string; startAfter?: Date },
+  ): Promise<string | null>;
+}
 
 export interface JobContext {
   tenantPool: pg.Pool;
   platformPool: pg.Pool;
-  log: { info: (o: object, msg?: string) => void; error: (o: object, msg?: string) => void };
+  queue: JobQueue;
+  store: ObjectStore;
+  asr: AsrProvider;
+  limits: PipelineLimits;
+  log: Logger;
+  now: () => Date;
 }
 
 export type Handler = (data: unknown, ctx: JobContext) => Promise<void>;
 
-/** Drains platform.domain_event in id order; marks processed. Fan-out rules arrive with M1a. */
-export const outboxDrain: Handler = async (_data, ctx) => {
-  const client = await ctx.platformPool.connect();
-  try {
-    await client.query('BEGIN');
-    const r = await client.query<{ id: string; org_id: string; type: string }>(
-      'SELECT id, org_id, type FROM platform.domain_event WHERE processed_at IS NULL ORDER BY id LIMIT 100 FOR UPDATE SKIP LOCKED',
-    );
-    for (const ev of r.rows) {
-      ctx.log.info({ eventId: ev.id, orgId: ev.org_id, type: ev.type }, 'outbox event');
-      await client.query('UPDATE platform.domain_event SET processed_at = now() WHERE id = $1', [
-        ev.id,
-      ]);
-    }
-    await client.query('COMMIT');
-  } catch (err) {
-    await client.query('ROLLBACK');
-    throw err;
-  } finally {
-    client.release();
-  }
-};
-
-/** Example tenant job proving the tenant context contract; real pipeline jobs arrive with M1a. */
+/** Example tenant job proving the tenant context contract. */
 export const tenantPing: Handler = async (data, ctx) => {
   const { orgId } = TenantJob.parse(data);
   await withTenant(ctx.tenantPool, { orgId, userId: null }, async (client) => {
@@ -47,7 +50,16 @@ export const tenantPing: Handler = async (data, ctx) => {
   });
 };
 
+export const QUEUES = {
+  outboxDrain: 'platform.outbox.drain',
+  mediaProcess: 'media.process',
+  contentTransition: 'content.transition',
+  tenantPing: 'tenant.ping',
+} as const;
+
 export const handlers: Record<string, Handler> = {
-  'platform.outbox.drain': outboxDrain,
-  'tenant.ping': tenantPing,
+  [QUEUES.outboxDrain]: outboxDrain,
+  [QUEUES.mediaProcess]: mediaProcess,
+  [QUEUES.contentTransition]: contentTransition,
+  [QUEUES.tenantPing]: tenantPing,
 };

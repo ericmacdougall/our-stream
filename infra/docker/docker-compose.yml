@@ -128,11 +128,44 @@ services:
       dockerfile: infra/docker/worker.Dockerfile
     environment:
       <<: *app-env
+      # ASR provider (ADR-0008): `fake` needs nothing; `whisper-http` talks to the optional `whisper`
+      # profile service below (`docker compose --profile whisper up`, see docs/development.md).
+      ASR_PROVIDER: ${ASR_PROVIDER:-fake}
+      WHISPER_URL: http://whisper:8080
+      FFMPEG_THREADS: ${FFMPEG_THREADS:-4}
+      MEDIA_MAX_INPUT_BYTES: ${MEDIA_MAX_INPUT_BYTES:-4294967296}
     depends_on:
       migrate:
         condition: service_completed_successfully
       storage:
         condition: service_healthy
+
+  whisper:
+    # Self-hosted ASR sidecar (MIT, ggml-org/whisper.cpp). Only started with `--profile whisper`.
+    # Download a ggml model once into the volume before the first start:
+    #   docker compose -f infra/docker/docker-compose.yml run --rm whisper download-ggml-model.sh base /models
+    # then run with ASR_PROVIDER=whisper-http and WHISPER_MODEL=ggml-base.bin (default).
+    image: ghcr.io/ggml-org/whisper.cpp:main
+    profiles: ['whisper']
+    command:
+      [
+        'whisper-server',
+        '--host',
+        '0.0.0.0',
+        '--port',
+        '8080',
+        '-m',
+        '/models/${WHISPER_MODEL:-ggml-base.bin}',
+        '-t',
+        '${WHISPER_THREADS:-4}',
+      ]
+    volumes:
+      - whisper-models:/models
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -fsS http://127.0.0.1:8080/health >/dev/null']
+      interval: 10s
+      timeout: 5s
+      retries: 30
 
   web:
     build:
@@ -152,3 +185,4 @@ services:
 volumes:
   postgres-data:
   storage-data:
+  whisper-models:
