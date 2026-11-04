@@ -1,9 +1,20 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Development and evaluation stack. Not hardened for production; see infra/helm for Kubernetes.
 # Usage: docker compose -f infra/docker/docker-compose.yml up
-# web and api bind to 127.0.0.1 by default; set BIND_ADDR=0.0.0.0 to expose them. Postgres, S3 and the mail
-# catcher always stay on loopback because the evaluation stack uses default credentials.
+# Browsers talk to one origin: the `edge` reverse proxy (Caddy) on 127.0.0.1:${WEB_PORT}. It sends /api and
+# /media to the api and everything else to web. The edge and api bind to 127.0.0.1 by default; set
+# BIND_ADDR=0.0.0.0 to expose them. Postgres, S3 and the mail catcher always stay on loopback because the
+# evaluation stack uses default credentials.
+# Trust chain for client addresses (docs/deployment.md "Trust chain"): the edge discards a client-supplied
+# X-Forwarded-For and sets it to the TCP peer; the api trusts exactly one address, the edge's static
+# EDGE_ADDRESS on the `edge` network. Nothing else (web, the Docker gateway, another container) is trusted.
+# Run two copies of this stack on one host with different EDGE_SUBNET/EDGE_ADDRESS values.
 name: our-stream
+
+x-edge-subnet: &edge-subnet ${EDGE_SUBNET:-10.228.0.0/24}
+x-edge-gateway: &edge-gateway ${EDGE_GATEWAY:-10.228.0.1}
+x-edge-ip-range: &edge-ip-range ${EDGE_IP_RANGE:-10.228.0.0/25}
+x-edge-address: &edge-address ${EDGE_ADDRESS:-10.228.0.254}
 
 x-app-env: &app-env
   NODE_ENV: development
@@ -40,6 +51,7 @@ services:
       ]
     ports:
       - '127.0.0.1:${POSTGRES_PORT:-5432}:5432'
+    networks: [backend]
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
@@ -63,6 +75,7 @@ services:
       ]
     ports:
       - '127.0.0.1:${S3_PORT:-8333}:8333'
+    networks: [backend]
     volumes:
       - storage-data:/data
       - ./seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
@@ -79,6 +92,7 @@ services:
     image: axllent/mailpit:v1.28
     ports:
       - '127.0.0.1:${MAILPIT_PORT:-8025}:8025'
+    networks: [backend]
     environment:
       MP_SMTP_AUTH_ACCEPT_ANY: '1'
       MP_SMTP_AUTH_ALLOW_INSECURE: '1'
@@ -91,6 +105,7 @@ services:
     environment:
       <<: *app-env
       DATABASE_ADMIN_URL: postgres://ourstream_admin:${POSTGRES_PASSWORD:-ourstream-dev-only}@postgres:5432/ourstream
+    networks: [backend]
     depends_on:
       postgres:
         condition: service_healthy
@@ -102,11 +117,15 @@ services:
     environment:
       <<: *app-env
       PORT: '4000'
-      # TRUST_PROXY stays false: the web container's Next.js rewrites forward X-Forwarded-For as the
-      # browser sent it without appending the peer, so trusting it would let clients pick their own
-      # address. Set it to your ingress CIDR only when that ingress appends the peer (docs/development.md).
+      # Exactly one trusted hop: the edge. Never `true`, never a range that includes web or the Docker
+      # gateway (docs/deployment.md "Trust chain").
+      TRUST_PROXY: ${EDGE_ADDRESS:-10.228.0.254}/32
+      S3_CORS_ORIGINS: ${S3_CORS_ORIGINS:-}
     ports:
       - '${BIND_ADDR:-127.0.0.1}:${API_PORT:-4000}:4000'
+    networks: [edge, backend]
+    read_only: true
+    tmpfs: [/tmp]
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -137,6 +156,11 @@ services:
       WHISPER_URL: http://whisper:8080
       FFMPEG_THREADS: ${FFMPEG_THREADS:-4}
       MEDIA_MAX_INPUT_BYTES: ${MEDIA_MAX_INPUT_BYTES:-4294967296}
+    networks: [backend]
+    read_only: true
+    # Media scratch space (WORKER_TMP_DIR) and ffmpeg's temp files live in memory-backed mounts; bind a
+    # volume at /var/tmp/ourstream instead when inputs approach MEDIA_MAX_INPUT_BYTES.
+    tmpfs: [/tmp, /var/tmp/ourstream]
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -162,6 +186,7 @@ services:
         '-t',
         '${WHISPER_THREADS:-4}',
       ]
+    networks: [backend]
     volumes:
       - whisper-models:/models
     healthcheck:
@@ -179,13 +204,63 @@ services:
       PORT: '3000'
       API_INTERNAL_URL: http://api:4000
       NEXT_PUBLIC_API_URL: http://localhost:${API_PORT:-4000}
-    ports:
-      - '${BIND_ADDR:-127.0.0.1}:${WEB_PORT:-3000}:3000'
+    # No host port on purpose: web is only reachable through the edge. Its /api and /media rewrites still
+    # work (used by `next dev`), but the edge routes those paths to the api before they reach web.
+    networks: [edge]
+    read_only: true
+    tmpfs: [/tmp, /app/apps/web/.next/cache]
     depends_on:
       api:
         condition: service_healthy
+
+  edge:
+    # The one origin browsers use. Caddy sets X-Forwarded-For to the peer it accepted the connection
+    # from and ignores whatever the client sent (its trusted_proxies list is empty): infra/docker/caddy.
+    image: caddy:2.11.7
+    environment:
+      EDGE_SITE_ADDRESS: ${EDGE_SITE_ADDRESS:-:3000}
+    ports:
+      - '${BIND_ADDR:-127.0.0.1}:${WEB_PORT:-3000}:3000'
+    networks:
+      edge:
+        ipv4_address: *edge-address
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    # The image runs as root so it can bind 80/443 when EDGE_SITE_ADDRESS names a public site; it keeps
+    # only that capability.
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ['no-new-privileges:true']
+    depends_on:
+      web:
+        condition: service_started
+      api:
+        condition: service_healthy
+    healthcheck:
+      # BusyBox wget (Alpine image) treats a 2xx/3xx from web as success.
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:3000/']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+networks:
+  # Only edge, web and api. The subnet is fixed so the edge can have the static address the api trusts.
+  # Dynamic addresses (web, api) come from the lower half, the edge sits outside it, and the gateway is fixed
+  # too: Docker would otherwise pick one, and it is the source address of host-published-port traffic, which
+  # must never be trusted.
+  edge:
+    ipam:
+      config:
+        - subnet: *edge-subnet
+          ip_range: *edge-ip-range
+          gateway: *edge-gateway
+  backend:
 
 volumes:
   postgres-data:
   storage-data:
   whisper-models:
+  caddy-data:
+  caddy-config:
