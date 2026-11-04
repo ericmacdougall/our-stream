@@ -168,6 +168,7 @@ export interface paths {
                 status: 'active' | 'deactivated';
               }[];
               csrfToken: string;
+              hasPassword: boolean;
               sessionToken?: string;
             };
           };
@@ -239,6 +240,7 @@ export interface paths {
                 status: 'active' | 'deactivated';
               }[];
               csrfToken: string;
+              hasPassword: boolean;
               sessionToken?: string;
             };
           };
@@ -391,6 +393,7 @@ export interface paths {
                 status: 'active' | 'deactivated';
               }[];
               csrfToken: string;
+              hasPassword: boolean;
               sessionToken?: string;
             };
           };
@@ -452,6 +455,7 @@ export interface paths {
                 status: 'active' | 'deactivated';
               }[];
               csrfToken: string;
+              hasPassword: boolean;
             };
           };
         };
@@ -523,6 +527,51 @@ export interface paths {
                 status: 'active' | 'deactivated';
               }[];
               csrfToken: string;
+              hasPassword: boolean;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/auth/password': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody: {
+        content: {
+          'application/json': {
+            password: string;
+          };
+        };
+      };
+      responses: {
+        /** @description Default Response */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': {
+              /** @enum {boolean} */
+              ok: true;
             };
           };
         };
@@ -557,14 +606,17 @@ export interface paths {
           };
           content: {
             'application/json': {
-              /** Format: uuid */
-              id: string;
-              /** @enum {string} */
-              kind: 'company' | 'department' | 'team' | 'project' | 'private';
-              slug: string;
-              name: string;
-              myRole: ('viewer' | 'contributor' | 'moderator' | 'owner') | null;
-            }[];
+              items: {
+                /** Format: uuid */
+                id: string;
+                /** @enum {string} */
+                kind: 'company' | 'department' | 'team' | 'project' | 'private';
+                slug: string;
+                name: string;
+                myRole: ('viewer' | 'contributor' | 'moderator' | 'owner') | null;
+                commentsEnabled: boolean;
+              }[];
+            };
           };
         };
       };
@@ -602,11 +654,139 @@ export interface paths {
               slug: string;
               name: string;
               myRole: ('viewer' | 'contributor' | 'moderator' | 'owner') | null;
+              commentsEnabled: boolean;
             };
           };
         };
       };
     };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/streams/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Default Response */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': {
+              /** Format: uuid */
+              id: string;
+              /** @enum {string} */
+              kind: 'company' | 'department' | 'team' | 'project' | 'private';
+              slug: string;
+              name: string;
+              myRole: ('viewer' | 'contributor' | 'moderator' | 'owner') | null;
+              commentsEnabled: boolean;
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
+        };
+        cookie?: never;
+      };
+      requestBody: {
+        content: {
+          'application/json': {
+            commentsEnabled?: boolean;
+          };
+        };
+      };
+      responses: {
+        /** @description Default Response */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': {
+              /** Format: uuid */
+              id: string;
+              /** @enum {string} */
+              kind: 'company' | 'department' | 'team' | 'project' | 'private';
+              slug: string;
+              name: string;
+              myRole: ('viewer' | 'contributor' | 'moderator' | 'owner') | null;
+              commentsEnabled: boolean;
+            };
+          };
+        };
+      };
+    };
+    trace?: never;
+  };
+  '/v1/streams/{id}/members': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Default Response */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': {
+              items: {
+                /** Format: uuid */
+                userId: string;
+                displayName: string;
+                /** @enum {string} */
+                role: 'viewer' | 'contributor' | 'moderator' | 'owner';
+              }[];
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -700,16 +880,18 @@ export interface paths {
           };
           content: {
             'application/json': {
-              /** Format: uuid */
-              userId: string;
-              displayName: string;
-              /** Format: email */
-              email: string;
-              /** @enum {string} */
-              role: 'owner' | 'admin' | 'announcer' | 'contributor' | 'member' | 'auditor';
-              /** @enum {string} */
-              status: 'active' | 'deactivated';
-            }[];
+              items: {
+                /** Format: uuid */
+                userId: string;
+                displayName: string;
+                /** Format: email */
+                email: string;
+                /** @enum {string} */
+                role: 'owner' | 'admin' | 'announcer' | 'contributor' | 'member' | 'auditor';
+                /** @enum {string} */
+                status: 'active' | 'deactivated';
+              }[];
+            };
           };
         };
       };
@@ -889,6 +1071,22 @@ export interface paths {
               )[];
               canEdit: boolean;
               contentEpoch: number;
+              tags: ('onboarding' | 'announcement' | 'current-events' | 'training')[];
+              pinned: boolean;
+              likeCount: number;
+              liked: boolean;
+              commentCount: number;
+              commentsEnabled: boolean;
+              media: {
+                hls: string;
+                poster: string | null;
+                sprite: string | null;
+                spriteVtt: string | null;
+                captions: {
+                  lang: string;
+                  url: string;
+                }[];
+              } | null;
             };
           };
         };
@@ -992,6 +1190,22 @@ export interface paths {
               )[];
               canEdit: boolean;
               contentEpoch: number;
+              tags: ('onboarding' | 'announcement' | 'current-events' | 'training')[];
+              pinned: boolean;
+              likeCount: number;
+              liked: boolean;
+              commentCount: number;
+              commentsEnabled: boolean;
+              media: {
+                hls: string;
+                poster: string | null;
+                sprite: string | null;
+                spriteVtt: string | null;
+                captions: {
+                  lang: string;
+                  url: string;
+                }[];
+              } | null;
             };
           };
         };
@@ -1110,6 +1324,22 @@ export interface paths {
               )[];
               canEdit: boolean;
               contentEpoch: number;
+              tags: ('onboarding' | 'announcement' | 'current-events' | 'training')[];
+              pinned: boolean;
+              likeCount: number;
+              liked: boolean;
+              commentCount: number;
+              commentsEnabled: boolean;
+              media: {
+                hls: string;
+                poster: string | null;
+                sprite: string | null;
+                spriteVtt: string | null;
+                captions: {
+                  lang: string;
+                  url: string;
+                }[];
+              } | null;
             };
           };
         };
@@ -1268,8 +1498,89 @@ export interface paths {
           };
           content: {
             'application/json': {
-              /** @enum {boolean} */
-              ok: true;
+              /** Format: uuid */
+              id: string;
+              /** @enum {string} */
+              kind: 'clip' | 'audio';
+              title: string;
+              description: string;
+              language: string;
+              links: {
+                /** @enum {string} */
+                kind: 'intranet' | 'internet' | 'attachment';
+                /** Format: uri */
+                url: string;
+                label: string;
+              }[];
+              chapters: {
+                atMs: number;
+                title: string;
+              }[];
+              /** @enum {string} */
+              state: 'draft' | 'published' | 'retracted';
+              publishAt: string | null;
+              expiresAt: string | null;
+              retractedAt: string | null;
+              owner: {
+                /** Format: uuid */
+                id: string;
+                displayName: string;
+              };
+              currentVersion: {
+                /** Format: uuid */
+                id: string;
+                /** @enum {string} */
+                status:
+                  'uploaded' | 'processing' | 'current' | 'superseded' | 'retracted' | 'failed';
+                processingStep: string | null;
+                processingError: string | null;
+                durationMs: number | null;
+                width: number | null;
+                height: number | null;
+                hasCaptions: boolean;
+              } | null;
+              audience: (
+                | {
+                    /** @enum {string} */
+                    type: 'everyone';
+                  }
+                | {
+                    /** @enum {string} */
+                    type: 'stream';
+                    /** Format: uuid */
+                    streamId: string;
+                  }
+                | {
+                    /** @enum {string} */
+                    type: 'group';
+                    /** Format: uuid */
+                    groupId: string;
+                  }
+                | {
+                    /** @enum {string} */
+                    type: 'user';
+                    /** Format: uuid */
+                    userId: string;
+                  }
+              )[];
+              canEdit: boolean;
+              contentEpoch: number;
+              tags: ('onboarding' | 'announcement' | 'current-events' | 'training')[];
+              pinned: boolean;
+              likeCount: number;
+              liked: boolean;
+              commentCount: number;
+              commentsEnabled: boolean;
+              media: {
+                hls: string;
+                poster: string | null;
+                sprite: string | null;
+                spriteVtt: string | null;
+                captions: {
+                  lang: string;
+                  url: string;
+                }[];
+              } | null;
             };
           };
         };
@@ -1408,6 +1719,22 @@ export interface paths {
               )[];
               canEdit: boolean;
               contentEpoch: number;
+              tags: ('onboarding' | 'announcement' | 'current-events' | 'training')[];
+              pinned: boolean;
+              likeCount: number;
+              liked: boolean;
+              commentCount: number;
+              commentsEnabled: boolean;
+              media: {
+                hls: string;
+                poster: string | null;
+                sprite: string | null;
+                spriteVtt: string | null;
+                captions: {
+                  lang: string;
+                  url: string;
+                }[];
+              } | null;
             };
           };
         };
@@ -1513,6 +1840,22 @@ export interface paths {
               )[];
               canEdit: boolean;
               contentEpoch: number;
+              tags: ('onboarding' | 'announcement' | 'current-events' | 'training')[];
+              pinned: boolean;
+              likeCount: number;
+              liked: boolean;
+              commentCount: number;
+              commentsEnabled: boolean;
+              media: {
+                hls: string;
+                poster: string | null;
+                sprite: string | null;
+                spriteVtt: string | null;
+                captions: {
+                  lang: string;
+                  url: string;
+                }[];
+              } | null;
             };
           };
         };
@@ -1629,6 +1972,8 @@ export interface paths {
           cursor?: string;
           limit?: number;
           streamId?: string;
+          tag?: 'onboarding' | 'announcement' | 'current-events' | 'training';
+          pinned?: 'true' | 'false';
         };
         header?: never;
         path?: never;
@@ -1693,6 +2038,11 @@ export interface paths {
                 }[];
                 viewed: boolean;
                 contentEpoch: number;
+                tags: ('onboarding' | 'announcement' | 'current-events' | 'training')[];
+                pinned: boolean;
+                likeCount: number;
+                liked: boolean;
+                commentCount: number;
               }[];
               nextCursor: string | null;
               authzEpoch: number;
@@ -1836,6 +2186,1116 @@ export interface paths {
     options?: never;
     head?: never;
     patch?: never;
+    trace?: never;
+  };
+  '/v1/content/{id}/like': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Default Response */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': {
+              liked: boolean;
+              likeCount: number;
+            };
+          };
+        };
+      };
+    };
+    delete: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Default Response */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': {
+              liked: boolean;
+              likeCount: number;
+            };
+          };
+        };
+      };
+    };
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/content/{id}/comments': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query?: {
+          cursor?: string;
+          limit?: number;
+        };
+        header?: never;
+        path: {
+          id: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Default Response */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': {
+              items: {
+                /** Format: uuid */
+                id: string;
+                /** Format: uuid */
+                contentId: string;
+                parentId: string | null;
+                author: {
+                  /** Format: uuid */
+                  id: string;
+                  displayName: string;
+                } | null;
+                body: string | null;
+                /** @enum {string} */
+                state: 'visible' | 'removed';
+                /** Format: date-time */
+                createdAt: string;
+                removedAt: string | null;
+                reportCount?: number;
+                canRemove: boolean;
+                replies: {
+                  /** Format: uuid */
+                  id: string;
+                  /** Format: uuid */
+                  contentId: string;
+                  parentId: string | null;
+                  author: {
+                    /** Format: uuid */
+                    id: string;
+                    displayName: string;
+                  } | null;
+                  body: string | null;
+                  /** @enum {string} */
+                  state: 'visible' | 'removed';
+                  /** Format: date-time */
+                  createdAt: string;
+                  removedAt: string | null;
+                  reportCount?: number;
+                  canRemove: boolean;
+                }[];
+                replyCount: number;
+              }[];
+              nextCursor: string | null;
+              commentsEnabled: boolean;
+              canModerate: boolean;
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
+        };
+        cookie?: never;
+      };
+      requestBody: {
+        content: {
+          'application/json': {
+            body: string;
+            /** @default null */
+            parentId?: string | null;
+            clientKey?: string;
+          };
+        };
+      };
+      responses: {
+        /** @description Default Response */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': {
+              /** Format: uuid */
+              id: string;
+              /** Format: uuid */
+              contentId: string;
+              parentId: string | null;
+              author: {
+                /** Format: uuid */
+                id: string;
+                displayName: string;
+              } | null;
+              body: string | null;
+              /** @enum {string} */
+              state: 'visible' | 'removed';
+              /** Format: date-time */
+              createdAt: string;
+              removedAt: string | null;
+              reportCount?: number;
+              canRemove: boolean;
+              replies: {
+                /** Format: uuid */
+                id: string;
+                /** Format: uuid */
+                contentId: string;
+                parentId: string | null;
+                author: {
+                  /** Format: uuid */
+                  id: string;
+                  displayName: string;
+                } | null;
+                body: string | null;
+                /** @enum {string} */
+                state: 'visible' | 'removed';
+                /** Format: date-time */
+                createdAt: string;
+                removedAt: string | null;
+                reportCount?: number;
+                canRemove: boolean;
+              }[];
+              replyCount: number;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/comments/{id}/report': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
+        };
+        cookie?: never;
+      };
+      requestBody: {
+        content: {
+          'application/json': {
+            /** @default  */
+            reason?: string;
+          };
+        };
+      };
+      responses: {
+        /** @description Default Response */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': {
+              /** @enum {boolean} */
+              ok: true;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/comments/{id}/remove': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
+        };
+        cookie?: never;
+      };
+      requestBody: {
+        content: {
+          'application/json': {
+            /** @default  */
+            reason?: string;
+          };
+        };
+      };
+      responses: {
+        /** @description Default Response */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': {
+              /** Format: uuid */
+              id: string;
+              /** Format: uuid */
+              contentId: string;
+              parentId: string | null;
+              author: {
+                /** Format: uuid */
+                id: string;
+                displayName: string;
+              } | null;
+              body: string | null;
+              /** @enum {string} */
+              state: 'visible' | 'removed';
+              /** Format: date-time */
+              createdAt: string;
+              removedAt: string | null;
+              reportCount?: number;
+              canRemove: boolean;
+              replies: {
+                /** Format: uuid */
+                id: string;
+                /** Format: uuid */
+                contentId: string;
+                parentId: string | null;
+                author: {
+                  /** Format: uuid */
+                  id: string;
+                  displayName: string;
+                } | null;
+                body: string | null;
+                /** @enum {string} */
+                state: 'visible' | 'removed';
+                /** Format: date-time */
+                createdAt: string;
+                removedAt: string | null;
+                reportCount?: number;
+                canRemove: boolean;
+              }[];
+              replyCount: number;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/content/{id}/share': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
+        };
+        cookie?: never;
+      };
+      requestBody: {
+        content: {
+          'application/json': {
+            /** Format: uuid */
+            userId: string;
+          };
+        };
+      };
+      responses: {
+        /** @description Default Response */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': {
+              delivered: boolean;
+              linkPath: string;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/search': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query: {
+          q: string;
+          cursor?: string;
+          limit?: number;
+          streamId?: string;
+          tag?: 'onboarding' | 'announcement' | 'current-events' | 'training';
+        };
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Default Response */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': {
+              items: {
+                /** Format: uuid */
+                id: string;
+                /** @enum {string} */
+                kind: 'clip' | 'audio';
+                title: string;
+                description: string;
+                /** Format: date-time */
+                publishAt: string;
+                owner: {
+                  /** Format: uuid */
+                  id: string;
+                  displayName: string;
+                };
+                /** Format: uuid */
+                versionId: string;
+                durationMs: number | null;
+                width: number | null;
+                height: number | null;
+                media: {
+                  hls: string;
+                  poster: string | null;
+                  sprite: string | null;
+                  spriteVtt: string | null;
+                  captions: {
+                    lang: string;
+                    url: string;
+                  }[];
+                };
+                streams: {
+                  /** Format: uuid */
+                  id: string;
+                  name: string;
+                  /** @enum {string} */
+                  kind: 'company' | 'department' | 'team' | 'project' | 'private';
+                }[];
+                tags: ('onboarding' | 'announcement' | 'current-events' | 'training')[];
+                snippets: {
+                  /** @enum {string} */
+                  source: 'title' | 'description' | 'transcript';
+                  text: string;
+                  ranges: [number, number][];
+                  tMs: number | null;
+                }[];
+                score: number;
+              }[];
+              total: number;
+              nextCursor: string | null;
+              authzEpoch: number;
+              orgContentEpoch: number;
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/content/{id}/engagement': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
+        };
+        cookie?: never;
+      };
+      requestBody: {
+        content: {
+          'application/json': {
+            /** Format: uuid */
+            versionId: string;
+            sessionKey: string;
+            /** @enum {string} */
+            type: 'view_start' | 'progress_25' | 'progress_50' | 'progress_75' | 'complete';
+            positionMs?: number;
+          };
+        };
+      };
+      responses: {
+        /** @description Default Response */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': {
+              recorded: boolean;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/content/{id}/stats': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Default Response */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': {
+              /** Format: uuid */
+              contentId: string;
+              /** @enum {string} */
+              privacyMode: 'aggregate_only' | 'named' | 'identified_for_required_only';
+              uniqueViewers: number;
+              viewStarts: number;
+              completions: number;
+              rewatches: number;
+              milestones: {
+                p25: number;
+                p50: number;
+                p75: number;
+              };
+              likes: number;
+              comments: number;
+              viewers?: {
+                /** Format: uuid */
+                userId: string;
+                displayName: string;
+                firstViewedAt: string | null;
+                lastViewedAt: string | null;
+                maxProgressPct: number;
+                completed: boolean;
+                watchCount: number;
+              }[];
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/org/settings': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Default Response */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': {
+              /** @enum {string} */
+              privacyMode: 'aggregate_only' | 'named' | 'identified_for_required_only';
+              commentsEnabled: boolean;
+              engagementRetentionDays: number;
+              /** @enum {string} */
+              commentScanPolicy: 'off' | 'warn' | 'block';
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody: {
+        content: {
+          'application/json': {
+            /** @enum {string} */
+            privacyMode?: 'aggregate_only' | 'named' | 'identified_for_required_only';
+            commentsEnabled?: boolean;
+            engagementRetentionDays?: number;
+            /** @enum {string} */
+            commentScanPolicy?: 'off' | 'warn' | 'block';
+          };
+        };
+      };
+      responses: {
+        /** @description Default Response */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': {
+              /** @enum {string} */
+              privacyMode: 'aggregate_only' | 'named' | 'identified_for_required_only';
+              commentsEnabled: boolean;
+              engagementRetentionDays: number;
+              /** @enum {string} */
+              commentScanPolicy: 'off' | 'warn' | 'block';
+            };
+          };
+        };
+      };
+    };
+    trace?: never;
+  };
+  '/v1/content/{id}/tags': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
+        };
+        cookie?: never;
+      };
+      requestBody: {
+        content: {
+          'application/json': {
+            tags: ('onboarding' | 'announcement' | 'current-events' | 'training')[];
+          };
+        };
+      };
+      responses: {
+        /** @description Default Response */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': {
+              /** Format: uuid */
+              id: string;
+              /** @enum {string} */
+              kind: 'clip' | 'audio';
+              title: string;
+              description: string;
+              language: string;
+              links: {
+                /** @enum {string} */
+                kind: 'intranet' | 'internet' | 'attachment';
+                /** Format: uri */
+                url: string;
+                label: string;
+              }[];
+              chapters: {
+                atMs: number;
+                title: string;
+              }[];
+              /** @enum {string} */
+              state: 'draft' | 'published' | 'retracted';
+              publishAt: string | null;
+              expiresAt: string | null;
+              retractedAt: string | null;
+              owner: {
+                /** Format: uuid */
+                id: string;
+                displayName: string;
+              };
+              currentVersion: {
+                /** Format: uuid */
+                id: string;
+                /** @enum {string} */
+                status:
+                  'uploaded' | 'processing' | 'current' | 'superseded' | 'retracted' | 'failed';
+                processingStep: string | null;
+                processingError: string | null;
+                durationMs: number | null;
+                width: number | null;
+                height: number | null;
+                hasCaptions: boolean;
+              } | null;
+              audience: (
+                | {
+                    /** @enum {string} */
+                    type: 'everyone';
+                  }
+                | {
+                    /** @enum {string} */
+                    type: 'stream';
+                    /** Format: uuid */
+                    streamId: string;
+                  }
+                | {
+                    /** @enum {string} */
+                    type: 'group';
+                    /** Format: uuid */
+                    groupId: string;
+                  }
+                | {
+                    /** @enum {string} */
+                    type: 'user';
+                    /** Format: uuid */
+                    userId: string;
+                  }
+              )[];
+              canEdit: boolean;
+              contentEpoch: number;
+              tags: ('onboarding' | 'announcement' | 'current-events' | 'training')[];
+              pinned: boolean;
+              likeCount: number;
+              liked: boolean;
+              commentCount: number;
+              commentsEnabled: boolean;
+              media: {
+                hls: string;
+                poster: string | null;
+                sprite: string | null;
+                spriteVtt: string | null;
+                captions: {
+                  lang: string;
+                  url: string;
+                }[];
+              } | null;
+            };
+          };
+        };
+      };
+    };
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/content/{id}/pin': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
+        };
+        cookie?: never;
+      };
+      requestBody: {
+        content: {
+          'application/json': {
+            /** @default null */
+            streamId?: string | null;
+          };
+        };
+      };
+      responses: {
+        /** @description Default Response */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': {
+              /** Format: uuid */
+              id: string;
+              /** @enum {string} */
+              kind: 'clip' | 'audio';
+              title: string;
+              description: string;
+              language: string;
+              links: {
+                /** @enum {string} */
+                kind: 'intranet' | 'internet' | 'attachment';
+                /** Format: uri */
+                url: string;
+                label: string;
+              }[];
+              chapters: {
+                atMs: number;
+                title: string;
+              }[];
+              /** @enum {string} */
+              state: 'draft' | 'published' | 'retracted';
+              publishAt: string | null;
+              expiresAt: string | null;
+              retractedAt: string | null;
+              owner: {
+                /** Format: uuid */
+                id: string;
+                displayName: string;
+              };
+              currentVersion: {
+                /** Format: uuid */
+                id: string;
+                /** @enum {string} */
+                status:
+                  'uploaded' | 'processing' | 'current' | 'superseded' | 'retracted' | 'failed';
+                processingStep: string | null;
+                processingError: string | null;
+                durationMs: number | null;
+                width: number | null;
+                height: number | null;
+                hasCaptions: boolean;
+              } | null;
+              audience: (
+                | {
+                    /** @enum {string} */
+                    type: 'everyone';
+                  }
+                | {
+                    /** @enum {string} */
+                    type: 'stream';
+                    /** Format: uuid */
+                    streamId: string;
+                  }
+                | {
+                    /** @enum {string} */
+                    type: 'group';
+                    /** Format: uuid */
+                    groupId: string;
+                  }
+                | {
+                    /** @enum {string} */
+                    type: 'user';
+                    /** Format: uuid */
+                    userId: string;
+                  }
+              )[];
+              canEdit: boolean;
+              contentEpoch: number;
+              tags: ('onboarding' | 'announcement' | 'current-events' | 'training')[];
+              pinned: boolean;
+              likeCount: number;
+              liked: boolean;
+              commentCount: number;
+              commentsEnabled: boolean;
+              media: {
+                hls: string;
+                poster: string | null;
+                sprite: string | null;
+                spriteVtt: string | null;
+                captions: {
+                  lang: string;
+                  url: string;
+                }[];
+              } | null;
+            };
+          };
+        };
+      };
+    };
+    delete: {
+      parameters: {
+        query?: {
+          streamId?: string;
+        };
+        header?: never;
+        path: {
+          id: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Default Response */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': {
+              /** Format: uuid */
+              id: string;
+              /** @enum {string} */
+              kind: 'clip' | 'audio';
+              title: string;
+              description: string;
+              language: string;
+              links: {
+                /** @enum {string} */
+                kind: 'intranet' | 'internet' | 'attachment';
+                /** Format: uri */
+                url: string;
+                label: string;
+              }[];
+              chapters: {
+                atMs: number;
+                title: string;
+              }[];
+              /** @enum {string} */
+              state: 'draft' | 'published' | 'retracted';
+              publishAt: string | null;
+              expiresAt: string | null;
+              retractedAt: string | null;
+              owner: {
+                /** Format: uuid */
+                id: string;
+                displayName: string;
+              };
+              currentVersion: {
+                /** Format: uuid */
+                id: string;
+                /** @enum {string} */
+                status:
+                  'uploaded' | 'processing' | 'current' | 'superseded' | 'retracted' | 'failed';
+                processingStep: string | null;
+                processingError: string | null;
+                durationMs: number | null;
+                width: number | null;
+                height: number | null;
+                hasCaptions: boolean;
+              } | null;
+              audience: (
+                | {
+                    /** @enum {string} */
+                    type: 'everyone';
+                  }
+                | {
+                    /** @enum {string} */
+                    type: 'stream';
+                    /** Format: uuid */
+                    streamId: string;
+                  }
+                | {
+                    /** @enum {string} */
+                    type: 'group';
+                    /** Format: uuid */
+                    groupId: string;
+                  }
+                | {
+                    /** @enum {string} */
+                    type: 'user';
+                    /** Format: uuid */
+                    userId: string;
+                  }
+              )[];
+              canEdit: boolean;
+              contentEpoch: number;
+              tags: ('onboarding' | 'announcement' | 'current-events' | 'training')[];
+              pinned: boolean;
+              likeCount: number;
+              liked: boolean;
+              commentCount: number;
+              commentsEnabled: boolean;
+              media: {
+                hls: string;
+                poster: string | null;
+                sprite: string | null;
+                spriteVtt: string | null;
+                captions: {
+                  lang: string;
+                  url: string;
+                }[];
+              } | null;
+            };
+          };
+        };
+      };
+    };
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/me/preferences': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Default Response */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': {
+              /** @enum {string} */
+              emailDigest: 'daily' | 'off';
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody: {
+        content: {
+          'application/json': {
+            /** @enum {string} */
+            emailDigest?: 'daily' | 'off';
+          };
+        };
+      };
+      responses: {
+        /** @description Default Response */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': {
+              /** @enum {string} */
+              emailDigest: 'daily' | 'off';
+            };
+          };
+        };
+      };
+    };
     trace?: never;
   };
 }
