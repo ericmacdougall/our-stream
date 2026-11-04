@@ -106,7 +106,7 @@ export const strings = {
     intro:
       'Choose a colleague. They receive a notification with a link; only people who can already see the clip can open it.',
     searchLabel: 'Find a colleague',
-    placeholder: 'Name or email',
+    placeholder: 'Name',
     sendTo: (name: string) => `Send to ${name}`,
     delivered: 'Shared. You can also send the link yourself.',
     notDelivered: 'That person cannot see this clip, so no link was sent.',

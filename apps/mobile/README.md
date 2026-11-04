@@ -1,56 +1,39 @@
-# Welcome to your Expo app 👋
+# our-stream mobile (apps/mobile)
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Expo (SDK 58, Expo Router) read-and-react client for any our-stream server: sign in, feed with HLS
+playback, likes, threaded comments, share as link, search, engagement and notifications. Licensed
+Apache-2.0 (see `LICENSE`, `THIRD_PARTY_NOTICES.md`); the only workspace dependency is
+`@our-stream/contracts` (AGPL-3.0-only OR Apache-2.0). Design notes: `docs/mobile.md`.
 
-## Get started
+## Layout
 
-1. Install dependencies
-
-   ```bash
-   npm install
-   ```
-
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **src/app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
-```bash
-npm run reset-project
+```
+src/app/              Expo Router screens
+  _layout.tsx         session provider, deep links (magic links)
+  index.tsx           redirect by session state
+  sign-in.tsx         email → server discovery/confirm → password or magic link
+  server.tsx          manual server address (Q5 fallback)
+  magic.tsx           magic-link landing (explicit "Sign in" before the token is used)
+  (tabs)/             feed, search, notifications
+  content/[id]/       detail with player, like, comments; share.tsx picks a recipient
+src/components/       Player (expo-video + media token + engagement), FeedCard, CommentThread, Snippet, Button, Notice
+src/lib/              pure modules with vitest tests: discovery, server, session, api, media, engagement,
+                      snippets, comments, feed, magic, errors; storage adapters; session context
+src/i18n.ts           string table (en)
 ```
 
-This command will move the starter code to the **example** directory and create a blank **src/app** directory where you can start developing.
+## Commands
 
-### Other setup steps
+```sh
+pnpm --filter @our-stream/contracts build
+pnpm --filter @our-stream/mobile test        # vitest, src/lib/**/*.test.ts
+pnpm --filter @our-stream/mobile typecheck
+pnpm --filter @our-stream/mobile lint        # expo lint
+pnpm exec expo start                         # from apps/mobile: Expo Go / dev build
+pnpm exec expo start --web                   # development click tests only
+pnpm exec expo export --platform ios --platform android --platform web --output-dir /tmp/export
+```
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
-
-## Learn more
-
-To learn more about developing your project with Expo, look at the following resources:
-
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+Point the app at a server by signing in with a work email whose domain publishes
+`/.well-known/our-stream.json`, or enter the address manually. Development builds accept
+`http://localhost` and `http://127.0.0.1` for a local API.

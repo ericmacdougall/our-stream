@@ -7,6 +7,7 @@ import type { KeyValueStore } from './kv';
 const PINS_KEY = 'os.pins';
 const SERVER_KEY = 'os.server';
 const SESSION_KEY = 'os.session';
+const LAST_SERVER_KEY = 'os.lastServer';
 
 export interface StoredSession {
   server: ServerConfig;
@@ -74,6 +75,23 @@ export async function loadSession(
   try {
     const server = parseServer(JSON.parse(serverRaw), opts.allowLoopbackHttp ?? false);
     return server ? { server, secret } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The server most recently confirmed or signed in to: the one a magic link is consumed against. */
+export async function saveLastServer(store: KeyValueStore, server: ServerConfig): Promise<void> {
+  await store.set(LAST_SERVER_KEY, JSON.stringify(server));
+}
+
+export async function loadLastServer(
+  store: KeyValueStore,
+  opts: { allowLoopbackHttp?: boolean } = {},
+): Promise<ServerConfig | null> {
+  try {
+    const raw = await store.get(LAST_SERVER_KEY);
+    return raw ? parseServer(JSON.parse(raw), opts.allowLoopbackHttp ?? false) : null;
   } catch {
     return null;
   }

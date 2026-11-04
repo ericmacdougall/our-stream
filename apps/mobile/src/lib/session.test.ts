@@ -3,9 +3,11 @@ import { describe, expect, it } from 'vitest';
 import { memoryStore } from './kv';
 import {
   clearSession,
+  loadLastServer,
   loadSession,
   pinServer,
   pinnedServer,
+  saveLastServer,
   saveSession,
   unpinServer,
 } from './session';
@@ -50,5 +52,24 @@ describe('session persistence', () => {
   it('treats a half-written session as absent', async () => {
     expect(await loadSession(memoryStore({ 'os.session': 'tok' }))).toBeNull();
     expect(await loadSession(memoryStore({ 'os.server': JSON.stringify(server) }))).toBeNull();
+  });
+});
+
+describe('last server', () => {
+  it('survives sign-out and rejects corrupted or insecure values', async () => {
+    const store = memoryStore();
+    expect(await loadLastServer(store)).toBeNull();
+    await saveLastServer(store, server);
+    await saveSession(store, { server, secret: 's' });
+    await clearSession(store);
+    expect(await loadLastServer(store)).toEqual(server);
+    expect(await loadLastServer(memoryStore({ 'os.lastServer': '{' }))).toBeNull();
+    expect(
+      await loadLastServer(
+        memoryStore({
+          'os.lastServer': JSON.stringify({ apiUrl: 'http://x', webUrl: 'http://x' }),
+        }),
+      ),
+    ).toBeNull();
   });
 });
