@@ -41,7 +41,7 @@ apps/
   web/          Next.js (App Router), PWA, feed, upload, ask, dashboards, admin
   api/          Fastify API: REST + OpenAPI, SSE streams, SCIM, webhooks, media auth
   worker/       Job handlers (pg-boss): media, documents, indexing, notifications, sync
-  mobile/       Expo Router app: sign-in, feed, ask, notifications (upload from M10)
+  mobile/       Expo Router app (Apache-2.0): server discovery, sign-in, feed, reactions, search, notifications; see docs/mobile.md (upload from M10)
 packages/
   contracts/    Zod schemas and TS types shared by web, api, mobile (API contract)
   db/           Drizzle schema, migrations, RLS policies, seed, test fixtures

@@ -26,7 +26,7 @@ Scope:
 
 ### M1b: react, find and measure, on web and mobile
 
-- Expo read-and-react app (sign-in, feed, like, comment) with server discovery (Q5).
+- Expo read-and-react app (sign-in, feed, like, comment, share, search, notifications) with server discovery by email domain and a manual fallback (Q5; `docs/mobile.md`).
 - Likes and comments (threaded, moderated per Q7), share as notification/link only.
 - Keyword search over titles, descriptions, captions and transcripts under `readerVisible`, including counts and snippets; results open the clip at the matching timestamp.
 - Engagement: view, progress milestones, complete, rewatch; per-clip stats and viewer lists under the org privacy mode (Q1).

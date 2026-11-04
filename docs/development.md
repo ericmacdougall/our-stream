@@ -56,6 +56,22 @@ pnpm --filter @our-stream/web test:e2e                                      # Pl
 E2E_API_URL=http://localhost:4000 pnpm --filter @our-stream/web test:e2e    # same suite against a real stack
 ```
 
+## Mobile app (apps/mobile)
+
+The Expo app (Apache-2.0) only ever calls the API through `@our-stream/contracts`; `docs/mobile.md`
+describes server discovery, sessions, media tokens and engagement.
+
+```sh
+pnpm --filter @our-stream/contracts build
+pnpm --filter @our-stream/mobile test                 # vitest over the pure modules in src/lib
+pnpm --filter @our-stream/mobile typecheck
+cd apps/mobile && pnpm exec expo start                # Expo Go / development build
+cd apps/mobile && pnpm exec expo start --web          # development click tests (serve it from the API's APP_BASE_URL origin for CORS)
+```
+
+Sign in with any email, pick "Enter the server address manually" and type `http://localhost:4000`
+(development builds accept loopback http only).
+
 ## Database roles
 
 Migrations run as the owner/admin role (`DATABASE_ADMIN_URL`). The API and tenant jobs connect as `ourstream_app` (`DATABASE_URL`), which has no `BYPASSRLS` and owns nothing; every tenant query runs inside `withTenant()` which sets `app.org_id`/`app.user_id` with `SET LOCAL`. The worker's platform jobs connect as `ourstream_platform` (`DATABASE_PLATFORM_URL`) for pg-boss and the outbox. `infra/docker/postgres/init/01-roles.sql` creates the dev roles; CI creates them inline.

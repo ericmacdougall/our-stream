@@ -13,7 +13,8 @@ not visible in the schemas.
   `Path=/`, `SESSION_TTL_DAYS`).
 - Native clients that cannot use cookies send `x-session-transport: bearer` on those three calls and
   receive `sessionToken` in the body (`AuthResponse`); afterwards they send `Authorization: Bearer <token>`.
-  Web clients never see the token.
+  Web clients never see the token. The mobile app stores it in the device's secure storage, sends every
+  request with `credentials: 'omit'` and revokes it with `POST /v1/auth/logout` on sign-out (`docs/mobile.md`).
 - On every request the API hashes the presented token, looks the session up (`platform_session_lookup`)
   and reads the membership row for the session's org (role, status, `authz_epoch`) inside `withTenant`.
   Nothing about permissions is carried in the cookie (ADR-0002, ADR-0004). A deactivated member is
@@ -49,8 +50,9 @@ An invited user signs in through the emailed link and may then choose a password
 
 - `POST /v1/auth/magic-link` always answers `{ok: true}`; a link is sent only when the address has an
   account. Links are single use and expire after `MAGIC_LINK_TTL_MINUTES` (`platform_magic_link_consume`
-  consumes atomically). The link is `${APP_BASE_URL}/auth/magic?token=...`; the web app posts the token
-  to `POST /v1/auth/magic-link/consume`.
+  consumes atomically). The link is `${APP_BASE_URL}/magic?token=...`; the web app posts the token
+  to `POST /v1/auth/magic-link/consume`, and the mobile app handles the same path as a universal link
+  (`docs/mobile.md`).
 - `POST /v1/invites` (org owner/admin) creates an account for the address if needed (no password), upserts
   the `invite` row and sends a link with purpose `invite`. Consuming it calls `platform_invite_accept`,
   which creates the membership, and the new session is bound to that org. A failed acceptance rolls the
