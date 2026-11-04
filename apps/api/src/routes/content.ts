@@ -356,17 +356,34 @@ export function registerContentRoutes(fastify: FastifyInstance, ctx: AppContext)
         const added = [...desired].filter(([key]) => !have.has(key));
         const removed = existing.rows.filter((row) => !desired.has(tupleKey(row)));
 
-        // Idempotent re-publish: an already-published item keeps its publish_at unless the request
-        // sets one, and a request that changes neither audience nor schedule writes nothing and emits
-        // nothing (a retry or a double submit must not reorder the feed or notify the audience twice).
+        // Idempotent re-publish. A live item (published, publish_at passed, not expired) keeps its
+        // publish_at unless the request sets one, so a retry or double submit never reorders the feed;
+        // for a draft, a scheduled item or an expired item, a null publishAt means "now" as on a first
+        // publish (helper code-inspection F1). A request that changes neither audience nor schedule
+        // writes nothing and emits nothing.
+        const now = new Date();
         const wasPublished = loaded.detail.state === 'published';
         const currentPublishAt = loaded.detail.publishAt ? new Date(loaded.detail.publishAt) : null;
         const currentExpiresAt = loaded.detail.expiresAt ? new Date(loaded.detail.expiresAt) : null;
-        const effectivePublishAt = publishAt ?? (wasPublished ? currentPublishAt : null);
+        const wasLiveBefore =
+          wasPublished &&
+          currentPublishAt !== null &&
+          currentPublishAt.getTime() <= now.getTime() &&
+          (currentExpiresAt === null || currentExpiresAt.getTime() > now.getTime());
+        const effectivePublishAt = publishAt ?? (wasLiveBefore ? currentPublishAt : null);
+        // Expiry is checked against the instant the item will actually be published from (F3): an
+        // expiry at or before that instant, or in the past, would expire the item immediately.
+        if (expiresAt) {
+          const from = effectivePublishAt ?? now;
+          if (expiresAt.getTime() <= from.getTime() || expiresAt.getTime() <= now.getTime())
+            throw badRequest('bad_expiry', 'expiresAt must be in the future and after publishAt');
+        }
         const sameInstant = (a: Date | null, b: Date | null) =>
           (a === null && b === null) || (a !== null && b !== null && a.getTime() === b.getTime());
+        // A null effective publish_at always means "set to now", which is a change.
         const scheduleChanged =
           !wasPublished ||
+          effectivePublishAt === null ||
           !sameInstant(effectivePublishAt, currentPublishAt) ||
           !sameInstant(expiresAt, currentExpiresAt);
         if (wasPublished && added.length === 0 && removed.length === 0 && !scheduleChanged) {
@@ -396,15 +413,18 @@ export function registerContentRoutes(fastify: FastifyInstance, ctx: AppContext)
             throw fromDbError(err);
           }
         }
-        // Events: a first publish announces as before. On an already-published item, only a wider
-        // audience on a live item re-emits content.published (the worker dedupes per version and
-        // recipient, so earlier recipients get no second notice); a narrowed audience emits nothing;
-        // a changed schedule emits its scheduling events.
-        const liveNow = !effectivePublishAt || effectivePublishAt.getTime() <= Date.now();
+        // Events: content.published whenever the item becomes live (first publish, a scheduled or
+        // expired item brought live, or a wider audience on a live item; the worker dedupes per
+        // version and recipient, so earlier recipients get no second notice, F2); a narrowed audience
+        // emits nothing; a changed future schedule emits content.scheduled and a changed expiry
+        // emits content.expiry_scheduled.
+        const liveNow = !effectivePublishAt || effectivePublishAt.getTime() <= now.getTime();
         const publishAtChanged =
-          !wasPublished || !sameInstant(effectivePublishAt, currentPublishAt);
+          !wasPublished ||
+          effectivePublishAt === null ||
+          !sameInstant(effectivePublishAt, currentPublishAt);
         if (liveNow) {
-          if (!wasPublished || added.length > 0)
+          if (!wasPublished || !wasLiveBefore || added.length > 0)
             await emit(client, 'content.published', contentId, loaded.currentVersionId, {});
         } else if (publishAtChanged) {
           await emit(client, 'content.scheduled', contentId, loaded.currentVersionId, {

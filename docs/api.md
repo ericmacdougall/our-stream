@@ -96,12 +96,18 @@ An invited user signs in through the emailed link and may then choose a password
   Events: `content.published` when `publishAt` is null or past, otherwise `content.scheduled`
   `{publishAt, expiresAt}`; plus `content.expiry_scheduled` `{expiresAt}` when an expiry is set. Publishing
   requires an uploaded version (409 `no_media`) and is refused for retracted items.
-  Publishing is idempotent: on an already-published item the request keeps `publish_at` unless it sets
-  `publishAt`, and a request whose audience and schedule equal the current ones writes nothing and emits
-  nothing (a retry or double submit never reorders the feed or notifies the audience twice). A wider
-  audience on a live item re-emits `content.published` (the worker's per-version, per-recipient dedupe
-  keeps earlier recipients at one notice); a narrowed audience emits nothing; a changed `publishAt` or
-  `expiresAt` emits `content.scheduled` / `content.expiry_scheduled` as on first publish.
+  Publishing is idempotent. On a **live** item (published, `publish_at` passed, not expired) a request
+  without `publishAt` keeps the current `publish_at`, and a request whose audience and schedule equal the
+  current ones writes nothing and emits nothing (a retry or double submit never reorders the feed or
+  notifies the audience twice). On a draft, a scheduled item or an expired item, a null `publishAt` means
+  "now", as on a first publish: "publish now" on a scheduled item makes it live immediately, and
+  republishing an expired item (without a new `expiresAt`) is a fresh publish at a new feed position.
+  `content.published` is emitted whenever the item becomes live, and when the audience of a live item
+  widens (the worker's per-version, per-recipient dedupe keeps earlier recipients at one notice); a
+  narrowed audience emits nothing; a changed future `publishAt` emits `content.scheduled` and a changed
+  `expiresAt` emits `content.expiry_scheduled`; clearing an expiry emits nothing (the pending expire job
+  sees it is no longer scheduled). `expiresAt` must be in the future and after the effective publish
+  instant (400 `bad_expiry`).
 - Retract: `POST /v1/content/:id/retract` calls `content_retract` (versions become `retracted`,
   `media_key_id` rotates) and emits `content.retracted` with the version that was current.
 - `POST /v1/content/:id/view` records a view with `record_view` only for the current version of a

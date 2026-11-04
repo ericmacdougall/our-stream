@@ -351,6 +351,94 @@ describe.skipIf(!integrationReady)('content, publish rules and feed (integration
     expect(await events('content.published')).toBe(2);
   });
 
+  it('republishing scheduled, live and expired items: null publishAt means now unless the item is live; events follow the change', async () => {
+    const { contentId } = await createPlayableContent(h, contributor, 'Rescheduled');
+    const events = async (type: string) =>
+      (
+        await h.admin.query<{ n: number }>(
+          `SELECT count(*)::int AS n FROM platform.domain_event WHERE subject_id = $1 AND type = $2`,
+          [contentId, type],
+        )
+      ).rows[0]!.n;
+    const inFeed = async () => (await feedIds(h, member)).ids.has(contentId);
+    const body = { audience: [{ type: 'stream', streamId: dept }] };
+    const publish = (extra: Record<string, unknown>) =>
+      h.call('POST', `/v1/content/${contentId}/publish`, contributor, { ...body, ...extra });
+    const detail = (r: { body: unknown }) =>
+      r.body as { state: string; publishAt: string; expiresAt: string | null };
+    const future = new Date(Date.now() + 3_600_000).toISOString();
+
+    // Scheduled first publish: one scheduled event, nothing live.
+    const scheduled = await publish({ publishAt: future });
+    expect(scheduled.status).toBe(200);
+    expect(detail(scheduled).publishAt).toBe(future);
+    expect(await events('content.scheduled')).toBe(1);
+    expect(await events('content.published')).toBe(0);
+    expect(await inFeed()).toBe(false);
+    // Resubmitted unchanged: no-op.
+    const same = await publish({ publishAt: future });
+    expect(detail(same).publishAt).toBe(future);
+    expect(await events('content.scheduled')).toBe(1);
+
+    // F1: "publish now" on a scheduled item (publishAt null) goes live now and notifies (F2).
+    const now1 = await publish({});
+    expect(now1.status).toBe(200);
+    expect(new Date(detail(now1).publishAt).getTime()).toBeLessThanOrEqual(Date.now());
+    expect(await events('content.published')).toBe(1);
+    expect(await inFeed()).toBe(true);
+    const livePublishAt = detail(now1).publishAt;
+
+    // Live -> scheduled again: scheduled event, leaves the feed; explicit past time -> live again, notified.
+    const future2 = new Date(Date.now() + 7_200_000).toISOString();
+    const resched = await publish({ publishAt: future2 });
+    expect(detail(resched).publishAt).toBe(future2);
+    expect(await events('content.scheduled')).toBe(2);
+    expect(await inFeed()).toBe(false);
+    const past = new Date(Date.now() - 1000).toISOString();
+    const explicitPast = await publish({ publishAt: past });
+    expect(detail(explicitPast).publishAt).toBe(past);
+    expect(await events('content.published')).toBe(2);
+    expect(await inFeed()).toBe(true);
+    expect(livePublishAt).not.toBe(past);
+
+    // F3: an expiry in the past is refused, with an inherited publish_at as well as an explicit one.
+    const pastExpiry = await publish({ expiresAt: new Date(Date.now() - 500).toISOString() });
+    expect(pastExpiry.status).toBe(400);
+    expect(errorCode(pastExpiry.body)).toBe('bad_expiry');
+    const expiryBeforeSchedule = await publish({ publishAt: future2, expiresAt: future });
+    expect(expiryBeforeSchedule.status).toBe(400);
+    expect(errorCode(expiryBeforeSchedule.body)).toBe('bad_expiry');
+    expect(detail(await publish({})).publishAt).toBe(past); // nothing above changed the row
+
+    // Set then clear an expiry on the live item: one expiry event, then none; publish_at untouched.
+    const future3 = new Date(Date.now() + 10_800_000).toISOString();
+    const withExpiry = await publish({ expiresAt: future3 });
+    expect(detail(withExpiry).expiresAt).toBe(future3);
+    expect(detail(withExpiry).publishAt).toBe(past);
+    expect(await events('content.expiry_scheduled')).toBe(1);
+    const cleared = await publish({ expiresAt: null });
+    expect(detail(cleared).expiresAt).toBeNull();
+    expect(detail(cleared).publishAt).toBe(past);
+    expect(await events('content.expiry_scheduled')).toBe(1);
+    expect(await events('content.published')).toBe(2);
+
+    // An expired item republished without a schedule is a fresh publish: new publish_at (new feed
+    // position), notified again.
+    await h.admin.query(`SELECT set_config('app.org_id', $1, false)`, [owner.orgId]);
+    await h.admin.query(
+      `UPDATE content SET expires_at = now() - interval '1 second' WHERE org_id = $1 AND id = $2`,
+      [owner.orgId, contentId],
+    );
+    await h.admin.query(`SELECT set_config('app.org_id', '', false)`);
+    expect(await inFeed()).toBe(false);
+    const revived = await publish({});
+    expect(revived.status).toBe(200);
+    expect(detail(revived).expiresAt).toBeNull();
+    expect(new Date(detail(revived).publishAt).getTime()).toBeGreaterThan(new Date(past).getTime());
+    expect(await events('content.published')).toBe(3);
+    expect(await inFeed()).toBe(true);
+  });
+
   it('scheduled items are absent before publish_at and appear once it passes; events are emitted', async () => {
     const { contentId, versionId } = await createPlayableContent(h, contributor, 'Scheduled');
     const publishAt = new Date(Date.now() + 3_600_000).toISOString();
