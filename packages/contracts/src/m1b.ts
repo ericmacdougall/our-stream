@@ -19,8 +19,10 @@ import {
   FeedQuery,
   FeedResponse,
   Me,
+  MemberSummary,
   Stream,
   StreamKind,
+  StreamRole,
   Uuid,
 } from './m1a.js';
 
@@ -208,6 +210,12 @@ export const OrgSettings = z.object({
 export const UpdateOrgSettingsRequest = OrgSettings.partial();
 export const UpdateStreamRequest = z.object({ commentsEnabled: z.boolean().optional() });
 export const StreamM1b = Stream.extend({ commentsEnabled: z.boolean() });
+/** List envelopes as the frozen M1a paths declare them (`{ items }`); the M1a routes answered bare arrays (GoodQA #35633). */
+export const StreamList = z.object({ items: z.array(StreamM1b) });
+export const MemberList = z.object({ items: z.array(MemberSummary) });
+/** Effective member of a stream (highest role, including access through groups or the everyone grant). */
+export const StreamMember = z.object({ userId: Uuid, displayName: z.string(), role: StreamRole });
+export const StreamMemberList = z.object({ items: z.array(StreamMember) });
 
 // ---- event tags and pins ----
 export const SetTagsRequest = z.object({

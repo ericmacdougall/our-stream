@@ -50,6 +50,39 @@ describe.skipIf(!integrationReady)('content, publish rules and feed (integration
     await h.cleanup();
   });
 
+  it('GET /v1/streams/:id/members lists effective members with roles; private streams are hidden from non-members (GoodQA #35633)', async () => {
+    const r = await h.call('GET', `/v1/streams/${dept}/members`, member);
+    expect(r.status).toBe(200);
+    const items = (
+      r.body as { items: Array<{ userId: string; displayName: string; role: string }> }
+    ).items;
+    expect(items.find((m) => m.userId === contributor.userId)).toMatchObject({
+      role: 'contributor',
+    });
+    expect(items.find((m) => m.userId === member.userId)).toMatchObject({ role: 'viewer' });
+    expect(items.find((m) => m.userId === owner.userId)).toMatchObject({ role: 'owner' });
+    expect(items.every((m) => typeof m.displayName === 'string' && m.displayName.length > 0)).toBe(
+      true,
+    );
+    expect(items.some((m) => m.userId === outsider.userId)).toBe(false);
+    // A department stream is listable by any member; a private stream only by its members.
+    expect((await h.call('GET', `/v1/streams/${dept}/members`, outsider)).status).toBe(200);
+    const secret = await createStream(h, owner, 'secret', 'private', [
+      { session: member, role: 'viewer' },
+    ]);
+    const asMember = await h.call('GET', `/v1/streams/${secret}/members`, member);
+    expect(asMember.status).toBe(200);
+    expect(
+      (asMember.body as { items: Array<{ userId: string }> }).items.map((m) => m.userId).sort(),
+    ).toEqual([owner.userId, member.userId].sort());
+    const asOutsider = await h.call('GET', `/v1/streams/${secret}/members`, outsider);
+    expect(asOutsider.status).toBe(404);
+    expect(errorCode(asOutsider.body)).toBe('stream_not_found');
+    const unknown = await h.call('GET', `/v1/streams/${randomUUID()}/members`, owner);
+    expect(unknown.status).toBe(404);
+    expect(errorCode(unknown.body)).toBe('stream_not_found');
+  });
+
   it('members cannot create content; contributors create drafts owned by themselves', async () => {
     const denied = await h.call('POST', '/v1/content', member, { kind: 'clip', title: 'nope' });
     expect(denied.status).toBe(403);
@@ -93,11 +126,11 @@ describe.skipIf(!integrationReady)('content, publish rules and feed (integration
     expect(byMember.status).toBe(404);
 
     // Contributor on dept, but only a viewer on the company stream.
-    const streams = (await h.call('GET', '/v1/streams', contributor)).body as Array<{
-      id: string;
-      kind: string;
-      myRole: string | null;
-    }>;
+    const streamsRes = await h.call('GET', '/v1/streams', contributor);
+    expect(Array.isArray(streamsRes.body)).toBe(false); // { items } per the frozen contract (GoodQA #35633)
+    const streams = (
+      streamsRes.body as { items: Array<{ id: string; kind: string; myRole: string | null }> }
+    ).items;
     const company = streams.find((s) => s.kind === 'company')!;
     expect(company.myRole).toBe('viewer');
     const toCompany = await h.call('POST', `/v1/content/${contentId}/publish`, contributor, {

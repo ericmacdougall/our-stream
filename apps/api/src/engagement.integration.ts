@@ -67,9 +67,9 @@ describe.skipIf(!integrationReady)('engagement, stats and privacy mode (integrat
       audience: [{ type: 'stream', streamId: dept }],
     });
     if (pub.status !== 200) throw new Error(`publish failed: ${pub.raw}`);
-    memberIds = ((await h.call('GET', '/v1/members', owner)).body as Array<{ userId: string }>).map(
-      (m) => m.userId,
-    );
+    memberIds = (
+      (await h.call('GET', '/v1/members', owner)).body as { items: Array<{ userId: string }> }
+    ).items.map((m) => m.userId);
     expect(memberIds.length).toBe(6);
   });
   afterAll(async () => {
@@ -277,10 +277,11 @@ describe.skipIf(!integrationReady)('engagement, stats and privacy mode (integrat
       audience: [{ type: 'everyone' }],
     });
     expect(pub.status).toBe(403); // contributors cannot publish org-wide; publish to the dept instead
-    const streams = (await h.call('GET', '/v1/streams', author)).body as Array<{
-      id: string;
-      kind: string;
-    }>;
+    const streams = (
+      (await h.call('GET', '/v1/streams', author)).body as {
+        items: Array<{ id: string; kind: string }>;
+      }
+    ).items;
     const deptId = streams.find((s) => s.kind === 'department')!.id;
     expect(
       (
