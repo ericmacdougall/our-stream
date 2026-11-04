@@ -3,7 +3,7 @@
 // arguments, which jobs are enqueued, and that a failing event never blocks the batch.
 import { describe, expect, it } from 'vitest';
 import type pg from 'pg';
-import { dispatchEvent, drainOnce, type DomainEvent } from './outbox.js';
+import { dispatchEvent, drainOnce, retentionFor, type DomainEvent } from './outbox.js';
 import { contentTransition } from './transition.js';
 import type { JobContext } from './jobs.js';
 
@@ -127,6 +127,7 @@ describe('dispatchEvent', () => {
         options: {
           singletonKey: `publish:${CONTENT}:${publishAt.toISOString()}`,
           startAfter: publishAt,
+          retentionSeconds: 21 * 3600 + 14 * 86_400, // outlives the 21 h deferral plus the default 14 d
         },
       },
       {
@@ -135,9 +136,11 @@ describe('dispatchEvent', () => {
         options: {
           singletonKey: `expire:${CONTENT}:${expiresAt.toISOString()}`,
           startAfter: expiresAt,
+          retentionSeconds: (28 * 24 - 3) * 3600 + 14 * 86_400,
         },
       },
     ]);
+    expect(retentionFor(new Date('2000-01-01T00:00:00Z'), new Date())).toBe(14 * 86_400);
     // Payload times are never used.
     expect(JSON.stringify(ctx.sent)).not.toContain('1999');
   });

@@ -24,7 +24,7 @@ export interface JobQueue {
   send(
     name: string,
     data: object,
-    options: { singletonKey: string; startAfter?: Date },
+    options: { singletonKey: string; startAfter?: Date; retentionSeconds?: number },
   ): Promise<string | null>;
 }
 

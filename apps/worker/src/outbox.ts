@@ -47,22 +47,28 @@ export async function scheduleTransitions(
   const s = await readSchedule(db, ev.org_id, ev.subject_id);
   if (!s || s.state !== 'published' || s.retracted_at) return;
   const base = { orgId: ev.org_id, contentId: ev.subject_id };
-  if (s.publish_at) {
-    const at = s.publish_at.toISOString();
+  const defer = async (kind: 'publish' | 'expire', when: Date) => {
+    const at = when.toISOString();
     await ctx.queue.send(
       QUEUES.contentTransition,
-      { ...base, kind: 'publish', at },
-      { singletonKey: `publish:${ev.subject_id}:${at}`, startAfter: s.publish_at },
+      { ...base, kind, at },
+      {
+        singletonKey: `${kind}:${ev.subject_id}:${at}`,
+        startAfter: when,
+        retentionSeconds: retentionFor(when, ctx.now()),
+      },
     );
-  }
-  if (s.expires_at) {
-    const at = s.expires_at.toISOString();
-    await ctx.queue.send(
-      QUEUES.contentTransition,
-      { ...base, kind: 'expire', at },
-      { singletonKey: `expire:${ev.subject_id}:${at}`, startAfter: s.expires_at },
-    );
-  }
+  };
+  if (s.publish_at) await defer('publish', s.publish_at);
+  if (s.expires_at) await defer('expire', s.expires_at);
+}
+
+const DEFAULT_RETENTION_S = 14 * 24 * 3600; // pg-boss deletes queued jobs after retentionSeconds (default 14 d)
+
+/** A deferred job must outlive its own startAfter, or pg-boss drops it before it ever runs. */
+export function retentionFor(startAfter: Date, now: Date): number {
+  const wait = Math.max(0, Math.ceil((startAfter.getTime() - now.getTime()) / 1000));
+  return wait + DEFAULT_RETENTION_S;
 }
 
 export interface FanOutResult {
