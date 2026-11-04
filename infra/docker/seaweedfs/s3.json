@@ -1,0 +1,9 @@
+{
+  "identities": [
+    {
+      "name": "ourstream-dev",
+      "credentials": [{ "accessKey": "ourstream-dev", "secretKey": "ourstream-dev-secret-only" }],
+      "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+    }
+  ]
+}

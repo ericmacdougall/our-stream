@@ -1,0 +1,45 @@
+{
+  "name": "@our-stream/api",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js",
+    "openapi:emit": "tsx src/openapi-emit.ts ../../packages/contracts/openapi.json",
+    "test": "vitest run --project unit",
+    "test:integration": "vitest run --project integration"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "3.1161.0",
+    "@aws-sdk/s3-request-presigner": "3.1161.0",
+    "@fastify/cookie": "11.1.5",
+    "@fastify/cors": "11.4.0",
+    "@fastify/helmet": "13.2.0",
+    "@fastify/rate-limit": "11.2.2",
+    "@fastify/sensible": "6.0.7",
+    "@fastify/swagger": "9.9.3",
+    "@our-stream/authz": "workspace:*",
+    "@our-stream/contracts": "workspace:*",
+    "@our-stream/db": "workspace:*",
+    "argon2": "0.45.2",
+    "fastify": "5.12.8",
+    "fastify-type-provider-zod": "7.0.0",
+    "nodemailer": "10.3.1",
+    "pg": "8.23.1",
+    "pino": "10.4.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "@types/nodemailer": "8.0.2",
+    "@types/pg": "8.23.1",
+    "pino-pretty": "13.2.0",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "vitest": "5.1.0"
+  }
+}

@@ -1,0 +1,22 @@
+version = 1
+SPDX-PackageName = "our-stream"
+SPDX-PackageSupplier = "our-stream contributors"
+SPDX-PackageDownloadLocation = "https://github.com/ericmacdougall/our-stream"
+
+[[annotations]]
+path = ["apps/mobile/**", "apps/mobile/LICENSE"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "our-stream contributors"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = ["packages/contracts/**"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "our-stream contributors"
+SPDX-License-Identifier = "AGPL-3.0-only OR Apache-2.0"
+
+[[annotations]]
+path = ["**"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "our-stream contributors"
+SPDX-License-Identifier = "AGPL-3.0-only"

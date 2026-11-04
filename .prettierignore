@@ -1,0 +1,15 @@
+pnpm-lock.yaml
+node_modules
+dist
+.next
+.expo
+.turbo
+coverage
+packages/contracts/openapi.json
+LICENSE
+test-results
+playwright-report
+blob-report
+.fixtures
+apps/web/public/sw.js
+apps/web/next-env.d.ts

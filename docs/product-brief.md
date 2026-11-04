@@ -8,13 +8,13 @@ our-stream is an open-source, self-hostable enterprise platform for **knowledge 
 
 ## Who it is for
 
-| Actor | Needs |
-|---|---|
-| Employee (viewer) | Open the app and immediately see what matters today: announcements, onboarding, team updates, training clips. Ask a question and get an answer with sources they are allowed to see, linking to the exact clip timestamp or page. |
-| Contributor (HR, trainers, managers, team leads) | Upload a clip, deck, PDF, spreadsheet or audio; choose who sees it and when; see who watched, rewatched, commented or acknowledged; find out what people are still confused about. |
-| Stream moderator / department admin | Curate a department stream, pin announcements, moderate comments, schedule campaigns (onboarding week, policy rollout). |
-| Org admin / IT | Configure SSO and SCIM, SharePoint/Teams/Copilot integrations, model providers and data-residency policy, retention and legal hold, audit logs; self-host with Docker or Kubernetes, or use the hosted service. |
-| Small team / individual | Sign up with email, create a workspace, start sharing clips with a few people without any IT involvement. |
+| Actor                                            | Needs                                                                                                                                                                                                                             |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Employee (viewer)                                | Open the app and immediately see what matters today: announcements, onboarding, team updates, training clips. Ask a question and get an answer with sources they are allowed to see, linking to the exact clip timestamp or page. |
+| Contributor (HR, trainers, managers, team leads) | Upload a clip, deck, PDF, spreadsheet or audio; choose who sees it and when; see who watched, rewatched, commented or acknowledged; find out what people are still confused about.                                                |
+| Stream moderator / department admin              | Curate a department stream, pin announcements, moderate comments, schedule campaigns (onboarding week, policy rollout).                                                                                                           |
+| Org admin / IT                                   | Configure SSO and SCIM, SharePoint/Teams/Copilot integrations, model providers and data-residency policy, retention and legal hold, audit logs; self-host with Docker or Kubernetes, or use the hosted service.                   |
+| Small team / individual                          | Sign up with email, create a workspace, start sharing clips with a few people without any IT involvement.                                                                                                                         |
 
 ## The problem
 
@@ -49,19 +49,19 @@ Large organizations drown in documents nobody reads and meetings nobody remember
 
 ## Proposed additional scenarios (inferred; confirm or cut)
 
-| Scenario | Why | Milestone |
-|---|---|---|
-| Policy acknowledgement / attestation | Compliance teams need proof that a person saw and accepted a policy version; pairs naturally with retraction alerts. | M4 |
-| Learning paths and quizzes | Onboarding and training are sequences, not single clips; a short quiz turns passive watching into measurable understanding and feeds the "misconceptions" dashboard. | M7 |
-| Expert Q&A routing | Unresolved questions should reach a named expert (or GoodQA) and the answer should become a clip or page, closing the loop. | M7 |
-| Multilingual auto-translation | Large teams span languages; captions, titles and answers should be available in the viewer's language, marked as machine-translated. | M7 |
-| Search (keyword + semantic, permission-filtered) | Not everything is a question; browsing and search must apply the same filter as retrieval. | M1 (keyword), M2 (hybrid) |
-| Accessibility | Captions, transcripts, keyboard navigation, reduced motion, pause control for autoplay, screen-reader labels, contrast. Legal requirement in many jurisdictions (EU EAA 2025, ADA, AODA). | M1 onward |
-| Retention and legal hold | Enterprises must delete on schedule and must not delete under hold. | M8 |
-| Audit log | Who published, retracted, changed audience, exported, configured identity or model providers. | M5 |
-| Data residency and model policy | Per-org pinning of storage region and allowed model vendors/regions, require-ZDR switch, self-host-only mode. | M2 (policy), M9 (multi-region hosted) |
-| Offline and push on mobile | Field staff; push for pinned announcements and retractions. | M10 |
-| Content expiry | Time-boxed announcements should leave the feed automatically. | M1a |
+| Scenario                                         | Why                                                                                                                                                                                       | Milestone                             |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| Policy acknowledgement / attestation             | Compliance teams need proof that a person saw and accepted a policy version; pairs naturally with retraction alerts.                                                                      | M4                                    |
+| Learning paths and quizzes                       | Onboarding and training are sequences, not single clips; a short quiz turns passive watching into measurable understanding and feeds the "misconceptions" dashboard.                      | M7                                    |
+| Expert Q&A routing                               | Unresolved questions should reach a named expert (or GoodQA) and the answer should become a clip or page, closing the loop.                                                               | M7                                    |
+| Multilingual auto-translation                    | Large teams span languages; captions, titles and answers should be available in the viewer's language, marked as machine-translated.                                                      | M7                                    |
+| Search (keyword + semantic, permission-filtered) | Not everything is a question; browsing and search must apply the same filter as retrieval.                                                                                                | M1 (keyword), M2 (hybrid)             |
+| Accessibility                                    | Captions, transcripts, keyboard navigation, reduced motion, pause control for autoplay, screen-reader labels, contrast. Legal requirement in many jurisdictions (EU EAA 2025, ADA, AODA). | M1 onward                             |
+| Retention and legal hold                         | Enterprises must delete on schedule and must not delete under hold.                                                                                                                       | M8                                    |
+| Audit log                                        | Who published, retracted, changed audience, exported, configured identity or model providers.                                                                                             | M5                                    |
+| Data residency and model policy                  | Per-org pinning of storage region and allowed model vendors/regions, require-ZDR switch, self-host-only mode.                                                                             | M2 (policy), M9 (multi-region hosted) |
+| Offline and push on mobile                       | Field staff; push for pinned announcements and retractions.                                                                                                                               | M10                                   |
+| Content expiry                                   | Time-boxed announcements should leave the feed automatically.                                                                                                                             | M1a                                   |
 
 Deferred unless the outcome requires them: live streaming, external (customer-facing) sharing, payments beyond hosted billing, a full LMS with SCORM, meeting recording bots.
 

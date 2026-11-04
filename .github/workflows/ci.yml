@@ -1,0 +1,65 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+name: ci
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secrets:
+    name: secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks (history and tree)
+        run: |
+          docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:latest git /repo --redact --no-banner --exit-code 7
+          docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:latest dir /repo --redact --no-banner --exit-code 7
+
+  verify:
+    name: lint, typecheck, unit, integration
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: ourstream_admin
+          POSTGRES_PASSWORD: ci-only
+          POSTGRES_DB: ourstream
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U ourstream_admin -d ourstream"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      DATABASE_ADMIN_URL: postgres://ourstream_admin:ci-only@localhost:5432/ourstream
+      DATABASE_URL: postgres://ourstream_app:ci-app-only@localhost:5432/ourstream
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: bootstrap database roles
+        run: |
+          psql "$DATABASE_ADMIN_URL" -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pgcrypto;"
+          psql "$DATABASE_ADMIN_URL" -v ON_ERROR_STOP=1 -c "CREATE ROLE ourstream_app LOGIN PASSWORD 'ci-app-only' NOBYPASSRLS; CREATE ROLE ourstream_platform LOGIN PASSWORD 'ci-platform-only' NOBYPASSRLS; GRANT CONNECT ON DATABASE ourstream TO ourstream_app, ourstream_platform;"
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm db:migrate
+      - run: pnpm test:integration
+      - name: license and header gate
+        run: pnpm licenses:check && pnpm headers:check

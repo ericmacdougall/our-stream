@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# gitleaks configuration: default rules plus reviewed false positives.
+title = "our-stream gitleaks config"
+
+[extend]
+useDefault = true
+
+# A unit-test constant holding a UUID used as a media key id (not a credential), introduced in the
+# commit below and since renamed; history is not rewritten. Both conditions must match.
+[[allowlists]]
+description = "lib.test.ts media key id UUID in commit 406052c"
+condition = "AND"
+commits = ["406052c6852896e03956620c11b0065ca5f219cd"]
+paths = ['''apps/api/src/lib/lib\.test\.ts''']
