@@ -331,11 +331,14 @@ $$;
 
 CREATE OR REPLACE FUNCTION authz_rebuild_user(p_org uuid, p_user uuid) RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, platform AS $$
+DECLARE v_status membership_status;
 BEGIN
   IF p_org IS NULL THEN RAISE EXCEPTION 'authz_rebuild_user: org required'; END IF;
-  PERFORM pg_advisory_xact_lock(hashtext('authz:' || p_org::text), hashtext(p_user::text));
+  -- The membership row is the per-user serialisation point for every path (tuple rebuilds, activation,
+  -- deactivation); locking it here avoids lock-order inversions with the membership triggers.
+  SELECT m.status INTO v_status FROM org_membership m WHERE m.org_id = p_org AND m.user_id = p_user FOR UPDATE;
   DELETE FROM user_group_membership WHERE org_id = p_org AND user_id = p_user;
-  IF NOT EXISTS (SELECT 1 FROM org_membership m WHERE m.org_id = p_org AND m.user_id = p_user AND m.status = 'active') THEN
+  IF v_status IS DISTINCT FROM 'active' THEN
     -- Deactivated or unknown members never hold derived access rows (ADR-0002 synchronous revocation).
     DELETE FROM user_stream_access WHERE org_id = p_org AND user_id = p_user;
     RETURN;

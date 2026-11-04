@@ -232,6 +232,46 @@ describe.skipIf(!adminUrl || !appUrl)(
       await ok(as(u.admin), tuple('content', c, 'viewer', 'user', u.member));
     });
 
+    it('N1: a non-moderator cannot remove a private stream from an audience (delete-then-add bypass)', async () => {
+      const c = acme.contentNames.privatePublished; // contributor is an editor (granted above), not a private-stream moderator
+      await expect(
+        withTenant(pool, as(u.contributor), (cl) =>
+          deleteTuple(
+            cl,
+            tuple('content', c, 'viewer', 'stream', acme.streamNames.private, 'viewer'),
+          ),
+        ),
+      ).rejects.toMatchObject({ code: 'private_stream_retarget' });
+      expect(await audienceOf(c)).toContain(`stream:${acme.streamNames.private}`);
+    });
+
+    it('M1: a fresh org reports epoch 0 before its first content change, then a positive epoch', async () => {
+      const fresh = await admin.query<{ id: string }>(
+        `INSERT INTO org (slug, name) VALUES ('fresh-wt', 'fresh') RETURNING id`,
+      );
+      const id = fresh.rows[0]!.id;
+      await admin.query(`SELECT set_config('app.org_id', $1, false)`, [id]);
+      const before = await admin.query<{ e: string }>(
+        'SELECT current_org_content_epoch($1)::text AS e',
+        [id],
+      );
+      expect(Number(before.rows[0]!.e)).toBe(0);
+      await admin.query(
+        `INSERT INTO org_membership (org_id, user_id, role) VALUES ($1, $2, 'owner')`,
+        [id, u.owner],
+      );
+      await admin.query(
+        `INSERT INTO content (org_id, kind, owner_id, title) VALUES ($1, 'clip', $2, 'first')`,
+        [id, u.owner],
+      );
+      const after = await admin.query<{ e: string }>(
+        'SELECT current_org_content_epoch($1)::text AS e',
+        [id],
+      );
+      expect(Number(after.rows[0]!.e)).toBeGreaterThan(0);
+      await admin.query(`DELETE FROM org WHERE id = $1`, [id]);
+    });
+
     it('group membership: admin only; cycles and depth beyond 4 are refused', async () => {
       const g = acme.groupNames;
       await expectRule(

@@ -23,6 +23,19 @@ describe.skipIf(!adminUrl)('schema lint (integration)', () => {
     expect(findings).toEqual([]);
   });
 
+  it('control: a SECURITY DEFINER function without an org guard or search_path pin is reported', async () => {
+    await admin.query(
+      `CREATE FUNCTION lint_control_unguarded() RETURNS int LANGUAGE sql SECURITY DEFINER AS 'SELECT 1'`,
+    );
+    const findings = await lintSchema(adminUrl!);
+    const problems = findings
+      .filter((f) => f.object === 'lint_control_unguarded')
+      .map((f) => f.problem);
+    expect(problems.some((p) => p.includes('org guard'))).toBe(true);
+    expect(problems.some((p) => p.includes('search_path'))).toBe(true);
+    await admin.query('DROP FUNCTION lint_control_unguarded()');
+  });
+
   it('control: a tenant table without org_id, RLS or policy is reported', async () => {
     await admin.query(
       'CREATE TABLE lint_control_unprotected (id uuid PRIMARY KEY DEFAULT gen_random_uuid())',

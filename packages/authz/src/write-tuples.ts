@@ -358,6 +358,21 @@ export async function deleteTuple(client: TenantClient, t: Tuple): Promise<void>
           'not_author',
         );
       }
+      if (t.subjectType === 'stream' && !actor.isAdmin) {
+        // Removing a private stream from the audience is the first step of the re-targeting ADR-0002 forbids.
+        const st = await client.query<{ kind: string }>(
+          'SELECT kind FROM stream WHERE org_id = $1 AND id = $2',
+          [orgId, t.subjectId],
+        );
+        if (st.rows[0]?.kind === 'private') {
+          const role = await actorStreamRole(client, t.subjectId);
+          if (role !== 'moderator' && role !== 'owner')
+            throw new AuthzRuleError(
+              'only moderators of a private stream may remove it from an audience',
+              'private_stream_retarget',
+            );
+        }
+      }
       break;
     }
     case 'group':
