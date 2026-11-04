@@ -196,3 +196,33 @@ test('a moderator sees report counts and can remove another member comment (mock
     .click();
   await expect(panel.locator('[data-testid="comment"][data-state="removed"]')).toHaveCount(1);
 });
+
+test('an unsent draft never surfaces for the next person on the same browser (mock)', async ({
+  page,
+  context,
+}) => {
+  test.skip(Boolean(process.env['E2E_API_URL']), 'needs the mock invitee hook');
+  const owner = uniqueAccount('draftleak');
+  await signUp(page, owner);
+  const id = await uploadClip(page, 'Shared browser clip');
+  await publishToEveryone(page, id);
+  await page.goto('/');
+  const panel = await openComments(page, id);
+  await panel.getByLabel('Write a comment').fill('private thought of the owner');
+  // Sign out through the UI (clears drafts) and sign in as another member in the same browser.
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  await page.waitForURL((u) => u.pathname === '/sign-in');
+  await signInInvitee(page, mockUrl, owner.orgSlug, `other-${owner.orgSlug}@example.test`);
+  await page.goto('/');
+  const theirs = await openComments(page, id);
+  await expect(theirs.getByLabel('Write a comment')).toHaveValue('');
+  // Even without the sign-out clearing, the key is per user: a stale entry cannot match.
+  await context.clearCookies();
+  await page.goto('/sign-in');
+  await page.getByLabel('Email').fill(owner.email);
+  await page.getByLabel('Password').fill(owner.password);
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await page.waitForURL((u) => u.pathname === '/');
+  const back = await openComments(page, id);
+  await expect(back.getByLabel('Write a comment')).toHaveValue('');
+});

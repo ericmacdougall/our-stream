@@ -7,6 +7,7 @@ import { browserApi } from '@/lib/api/client';
 import { listItems } from '@/lib/api/lists';
 import { errorMessage } from '@/lib/errors';
 import { updateStreamComments } from '@/lib/m1b/api';
+import { useSession } from '@/components/SessionProvider';
 import { t, type MessageId } from '@/lib/i18n';
 import { Notice } from '../Notice';
 import { KIND_LABEL } from './StreamsPanel';
@@ -37,6 +38,11 @@ export function StreamDetail({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const canGrant = stream.myRole === 'owner' || stream.myRole === 'moderator';
+  // PATCH /v1/streams/{id} accepts an org owner/admin or the stream's owner (role_forbidden
+  // otherwise): offer the comments switch to exactly those, not to stream moderators.
+  const me = useSession();
+  const orgAdmin = me?.org?.role === 'owner' || me?.org?.role === 'admin';
+  const canToggleComments = orgAdmin || stream.myRole === 'owner';
   // M1b (StreamM1b.commentsEnabled): absent on an M1a server, then treated as allowed.
   const initialComments = (stream as { commentsEnabled?: boolean }).commentsEnabled ?? true;
   const [commentsEnabled, setCommentsEnabled] = useState(initialComments);
@@ -106,7 +112,7 @@ export function StreamDetail({
           {stream.myRole ? ` · ${t('streams.myRole', { role: stream.myRole })}` : ''}
         </p>
       </header>
-      {canGrant ? (
+      {canToggleComments ? (
         <section
           className="card"
           aria-labelledby="stream-comments-heading"
@@ -141,7 +147,7 @@ export function StreamDetail({
         )}
       </section>
       {canGrant ? (
-        <form onSubmit={(e) => void grant(e)} className="card form" noValidate>
+        <form method="post" onSubmit={(e) => void grant(e)} className="card form" noValidate>
           <h2>{t('streams.grantHeading')}</h2>
           <fieldset className="field">
             <legend>{t('streams.grantSubject')}</legend>

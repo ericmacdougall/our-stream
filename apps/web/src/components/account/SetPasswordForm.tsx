@@ -146,7 +146,7 @@ export function SetPasswordForm() {
         {outcomeText}
       </p>
       {settled ? null : (
-        <form onSubmit={submit} className="form" noValidate>
+        <form method="post" onSubmit={submit} className="form" noValidate>
           <p className="muted">{t('account.password.intro')}</p>
           <div className="field">
             <label htmlFor={`${id}-new`}>{t('account.password.new')}</label>

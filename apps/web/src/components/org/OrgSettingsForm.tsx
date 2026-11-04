@@ -59,7 +59,13 @@ export function OrgSettingsForm({ initial }: { initial: Org }) {
   }
 
   return (
-    <form onSubmit={(e) => void submit(e)} className="card form" noValidate aria-busy={pending}>
+    <form
+      method="post"
+      onSubmit={(e) => void submit(e)}
+      className="card form"
+      noValidate
+      aria-busy={pending}
+    >
       <p className="muted">{t('org.intro')}</p>
       <div className="field">
         <label htmlFor="privacyMode">{t('org.privacyMode')}</label>

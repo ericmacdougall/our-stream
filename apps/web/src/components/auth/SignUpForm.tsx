@@ -79,7 +79,7 @@ export function SignUpForm() {
   }
 
   return (
-    <form onSubmit={(e) => void submit(e)} className="card form" noValidate>
+    <form method="post" onSubmit={(e) => void submit(e)} className="card form" noValidate>
       <h1>{t('auth.signUp.title')}</h1>
       <p className="muted">{t('auth.signUp.intro')}</p>
       <div className="field">

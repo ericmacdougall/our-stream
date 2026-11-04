@@ -11,10 +11,11 @@ database: every read and write goes to the API through the typed client in `@our
   same-site and `FeedItem.media` relative paths resolve. Rewrites are fixed at build time; the Docker
   build takes `API_INTERNAL_URL` as a build arg (default `http://api:4000`, matching compose).
 - Behind an edge that already routes `/api` and `/media` to the API (Caddy in compose, the Helm
-  chart's Ingress) the production image is built with `WEB_PROXY_API=false` (web.Dockerfile build
-  arg): `next.config.ts` then emits no rewrite at all, so a misrouted request fails closed at web
-  instead of web becoming an unintended hop. Leave it unset (default `true`) for `next dev` and for
-  images that must work without an edge.
+  chart's Ingress) the image carries no rewrite: `web.Dockerfile` defaults its `WEB_PROXY_API` build
+  arg to `false`, and `next.config.ts` then emits no rewrite at all, so a misrouted request fails
+  closed at web instead of web becoming an unintended hop. `next dev` and local builds keep the
+  rewrites (the variable is unset there); an image that must serve without an edge is built with
+  `--build-arg WEB_PROXY_API=true`.
 - `API_INTERNAL_URL` is also read at runtime by the Data Access Layer, so `next start` needs it in
   the environment even though the browser rewrite target is fixed at build time.
 - Server components use the Data Access Layer in `src/lib/api/server.ts`, which forwards the request

@@ -20,9 +20,9 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ARG API_INTERNAL_URL=http://api:4000
 ENV API_INTERNAL_URL=${API_INTERNAL_URL}
 # Behind an edge (Caddy in compose, the chart's Ingress) /api and /media never reach web, so the
-# production image carries no rewrite: WEB_PROXY_API=false fails closed on a misrouted request.
-# Keep the default (true) only for images that must be reachable without an edge.
-ARG WEB_PROXY_API=true
+# image carries no rewrite by default and fails closed on a misrouted request. Only an image that
+# must serve without an edge is built with --build-arg WEB_PROXY_API=true.
+ARG WEB_PROXY_API=false
 ENV WEB_PROXY_API=${WEB_PROXY_API}
 RUN pnpm --filter @our-stream/contracts build && pnpm --filter @our-stream/web build
 

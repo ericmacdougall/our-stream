@@ -115,7 +115,7 @@ export function TagsPinsEditor({
 
   return (
     <section className="card" aria-labelledby="tags-heading" data-testid="tags-pins">
-      <form onSubmit={(e) => void saveTags(e)} className="form" noValidate>
+      <form method="post" onSubmit={(e) => void saveTags(e)} className="form" noValidate>
         <h2 id="tags-heading">{t('tags.heading')}</h2>
         <fieldset className="field" disabled={pending !== null}>
           <legend className="visually-hidden">{t('tags.heading')}</legend>

@@ -109,6 +109,7 @@
   "prefs.daily": "Daily",
   "prefs.off": "Off",
   "prefs.saved": "Preference saved.",
+  "prefs.unknown": "Your current preference could not be loaded. Choose an option to set it.",
 
   "nav.orgSettings": "Organisation",
   "org.title": "Organisation settings",
@@ -262,6 +263,7 @@
   "error.pinForbidden": "You cannot pin this clip there.",
   "error.notInAudience": "This clip is not published to that stream.",
   "error.unavailable": "This clip is no longer available.",
+  "error.notPublished": "This clip is not published yet.",
   "error.selfShare": "You cannot share a clip with yourself.",
 
   "streams.listHeading": "Your streams",

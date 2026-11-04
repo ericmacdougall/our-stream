@@ -5,6 +5,7 @@ import {
   reduceEngagement,
   type EngagementEvent,
   type EngagementState,
+  type EngagementStep,
 } from './engagement.js';
 
 const V1 = '11111111-1111-4111-8111-111111111111';
@@ -27,6 +28,12 @@ function run(
 }
 
 const start = () => initialEngagement({ versionId: V1, durationMs: 100_000 });
+/** timeupdate ticks every `step` ms from `from` to `to` inclusive (browsers tick ~4x per second). */
+function ticks(from: number, to: number, step: number): EngagementStep[] {
+  const out: EngagementStep[] = [];
+  for (let ms = from; ms <= to; ms += step) out.push({ type: 'time', positionMs: ms });
+  return out;
+}
 const types = (events: EngagementEvent[]) => events.map((e) => e.type);
 
 describe('engagement milestones', () => {
@@ -34,14 +41,7 @@ describe('engagement milestones', () => {
     const { events } = run(start(), [
       { type: 'eligible', value: true },
       { type: 'playing' },
-      { type: 'time', positionMs: 1_000 },
-      { type: 'time', positionMs: 24_000 },
-      { type: 'time', positionMs: 25_200 },
-      { type: 'time', positionMs: 26_000 },
-      { type: 'time', positionMs: 49_900 },
-      { type: 'time', positionMs: 50_100 },
-      { type: 'time', positionMs: 74_900 },
-      { type: 'time', positionMs: 75_100 },
+      ...ticks(0, 100_000, 250),
       { type: 'ended' },
     ]);
     expect(types(events)).toEqual([
@@ -57,19 +57,18 @@ describe('engagement milestones', () => {
       expect(e.sessionKey).toBe(key);
       expect(e.versionId).toBe(V1);
     }
-    expect(events[1]?.positionMs).toBe(25_200);
+    expect(events[1]?.positionMs).toBe(25_000);
   });
   it('never fires a milestone from a seek: a jump past 50 % fires nothing until playback crosses the next threshold', () => {
     const { events } = run(start(), [
       { type: 'eligible', value: true },
       { type: 'playing' },
-      { type: 'time', positionMs: 1_000 },
-      // The viewer drags the scrubber to 60 %: the position jumps.
-      { type: 'seeked', positionMs: 60_000 },
+      ...ticks(0, 1_000, 250),
+      // The viewer drags the scrubber to 60 %. Browsers raise timeupdate for the new position
+      // BEFORE seeked, so the jump must be recognised from the position alone.
       { type: 'time', positionMs: 60_000 },
-      { type: 'time', positionMs: 61_000 },
-      { type: 'time', positionMs: 74_800 },
-      { type: 'time', positionMs: 75_300 },
+      { type: 'seeked', positionMs: 60_000 },
+      ...ticks(60_250, 76_000, 250),
     ]);
     expect(types(events)).toEqual(['view_start', 'progress_75']);
   });
@@ -77,15 +76,13 @@ describe('engagement milestones', () => {
     const { events } = run(start(), [
       { type: 'eligible', value: true },
       { type: 'playing' },
-      { type: 'time', positionMs: 24_500 },
-      { type: 'time', positionMs: 25_500 },
-      { type: 'seeked', positionMs: 10_000 },
+      ...ticks(24_000, 25_500, 250),
       { type: 'time', positionMs: 10_000 },
-      { type: 'time', positionMs: 24_600 },
-      { type: 'time', positionMs: 25_600 },
-      { type: 'seeked', positionMs: 5_000 },
-      { type: 'time', positionMs: 24_700 },
-      { type: 'time', positionMs: 25_700 },
+      { type: 'seeked', positionMs: 10_000 },
+      ...ticks(10_250, 12_000, 250),
+      { type: 'time', positionMs: 24_000 },
+      { type: 'seeked', positionMs: 24_000 },
+      ...ticks(24_250, 25_750, 250),
     ]);
     expect(types(events)).toEqual(['view_start', 'progress_25']);
   });
@@ -101,16 +98,13 @@ describe('engagement milestones', () => {
   it('emits nothing while ineligible (inactive item or hidden tab) and resumes without back-filling', () => {
     const { events } = run(start(), [
       { type: 'playing' }, // not eligible yet: muted autoplay off-screen
-      { type: 'time', positionMs: 30_000 },
+      ...ticks(0, 30_000, 250),
       { type: 'eligible', value: true },
-      { type: 'time', positionMs: 30_500 },
-      { type: 'time', positionMs: 49_900 },
-      { type: 'time', positionMs: 50_100 },
+      ...ticks(30_250, 50_250, 250),
       { type: 'eligible', value: false }, // tab hidden
-      { type: 'time', positionMs: 74_900 },
-      { type: 'time', positionMs: 75_100 },
+      ...ticks(50_500, 75_250, 250),
       { type: 'eligible', value: true },
-      { type: 'time', positionMs: 76_000 },
+      ...ticks(75_500, 76_000, 250),
     ]);
     // view_start when it first became eligible while playing; 25 % was never crossed while counted.
     expect(types(events)).toEqual(['view_start', 'progress_50']);
@@ -119,15 +113,10 @@ describe('engagement milestones', () => {
     const first = run(start(), [
       { type: 'eligible', value: true },
       { type: 'playing' },
-      { type: 'time', positionMs: 99_000 },
+      ...ticks(0, 100_000, 250),
       { type: 'ended' },
     ]);
-    const second = run(first.state, [
-      { type: 'playing' },
-      { type: 'time', positionMs: 500 },
-      { type: 'time', positionMs: 24_900 },
-      { type: 'time', positionMs: 25_100 },
-    ]);
+    const second = run(first.state, [{ type: 'playing' }, ...ticks(0, 25_250, 250)]);
     expect(types(second.events)).toEqual(['view_start', 'progress_25']);
     expect(second.events[0]?.sessionKey).not.toBe(first.events[0]?.sessionKey);
   });
@@ -135,14 +124,12 @@ describe('engagement milestones', () => {
     const first = run(start(), [
       { type: 'eligible', value: true },
       { type: 'playing' },
-      { type: 'time', positionMs: 24_000 },
-      { type: 'time', positionMs: 26_000 },
+      ...ticks(23_000, 26_000, 250),
     ]);
     const next = run(first.state, [
       { type: 'version', versionId: V2, durationMs: 50_000 },
       { type: 'playing' },
-      { type: 'time', positionMs: 12_000 },
-      { type: 'time', positionMs: 13_000 },
+      ...ticks(11_000, 13_000, 250),
     ]);
     expect(types(next.events)).toEqual(['view_start', 'progress_25']);
     expect(next.events[0]?.versionId).toBe(V2);
@@ -152,8 +139,7 @@ describe('engagement milestones', () => {
     const { events } = run(initialEngagement({ versionId: V1, durationMs: null }), [
       { type: 'eligible', value: true },
       { type: 'playing' },
-      { type: 'time', positionMs: 10 },
-      { type: 'time', positionMs: 10_000_000 },
+      ...ticks(0, 2_000, 250),
       { type: 'ended' },
     ]);
     expect(types(events)).toEqual(['view_start', 'complete']);

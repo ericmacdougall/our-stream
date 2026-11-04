@@ -77,7 +77,7 @@ export function StreamsPanel({ initial }: { initial: StreamT[] }) {
           </ul>
         )}
       </section>
-      <form onSubmit={(e) => void create(e)} className="card form" noValidate>
+      <form method="post" onSubmit={(e) => void create(e)} className="card form" noValidate>
         <h2>{t('streams.createHeading')}</h2>
         <div className="field">
           <label htmlFor="stream-kind">{t('streams.kind')}</label>

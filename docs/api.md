@@ -231,5 +231,7 @@ linkPath}` is identical for unknown, deactivated and no-access recipients, every
 - `GET /v1/feed` accepts `tag=` and `pinned=true` as additional filters; items carry `tags`, `pinned`,
   `likeCount`, `liked`, `commentCount` (visible comments only). `GET /v1/content/:id` carries the same plus
   `commentsEnabled`. `GET /v1/streams` items and `PATCH /v1/streams/:id` carry `commentsEnabled`.
+  `PATCH /v1/streams/:id` is accepted from an org owner/admin or the stream's owner only (403
+  `role_forbidden` otherwise, including stream moderators); the web shows the switch to exactly those.
 - `GET /v1/me` carries `hasPassword`; `POST /v1/auth/password` answers 409 `password_set` before
   hashing when a password exists.

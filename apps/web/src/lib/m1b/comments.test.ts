@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyRemoved,
+  clearDrafts,
   draftStorageKey,
   isUnavailableCode,
   mergeComment,
@@ -104,8 +105,10 @@ describe('drafts keep one clientKey per text until it is settled', () => {
       newDraft('r1', () => 'k9'),
       { type: 'edit', body: 'kept' },
     ).draft;
-    expect(draftStorageKey('c1', 'r1')).toBe('os.comment-draft.c1.r1');
-    expect(draftStorageKey('c1', null)).toBe('os.comment-draft.c1.root');
+    expect(draftStorageKey('u1', 'c1', 'r1')).toBe('os.comment-draft.u1.c1.r1');
+    expect(draftStorageKey('u1', 'c1', null)).toBe('os.comment-draft.u1.c1.root');
+    // Another user never shares a key with the same clip (shared-browser sign-out safety).
+    expect(draftStorageKey('u2', 'c1', 'r1')).not.toBe(draftStorageKey('u1', 'c1', 'r1'));
     const restored = restoreDraft(serialiseDraft(d), 'r1', () => 'fresh');
     expect(restored).toMatchObject({
       clientKey: 'k9',
@@ -113,9 +116,11 @@ describe('drafts keep one clientKey per text until it is settled', () => {
       parentId: 'r1',
       phase: 'editing',
     });
-    // An in-flight draft restores as editing (the page is gone, so is the request).
+    // A draft that had been sent at least once comes back frozen with its key: the text may already
+    // be stored under it, so only an identical Retry or a Discard is possible, never an edit.
     const inflight = restoreDraft(serialiseDraft(sending(() => 'k1')), null, () => 'fresh');
-    expect(inflight).toMatchObject({ phase: 'editing', clientKey: 'k1', body: 'hello' });
+    expect(inflight).toMatchObject({ phase: 'uncertain', clientKey: 'k1', body: 'hello' });
+    expect(reduceDraft(inflight, { type: 'edit', body: 'changed' }).draft).toBe(inflight);
     // Garbage, a foreign shape, a different parent or an oversized key yields a fresh draft.
     expect(restoreDraft('{"nope":1}', null, () => 'fresh').clientKey).toBe('fresh');
     expect(restoreDraft('not json', null, () => 'fresh').clientKey).toBe('fresh');
@@ -167,12 +172,31 @@ describe('thread merging', () => {
   });
 });
 
+describe('clearDrafts', () => {
+  it('removes only draft keys from a storage', () => {
+    const store = new Map<string, string>([
+      ['os.comment-draft.u1.c1.root', '{}'],
+      ['os.comment-draft.u2.c9.r1', '{}'],
+      ['os.feed-settings', '{}'],
+    ]);
+    const storage = {
+      get length() {
+        return store.size;
+      },
+      key: (i: number) => [...store.keys()][i] ?? null,
+      removeItem: (k: string) => void store.delete(k),
+    };
+    clearDrafts(storage);
+    expect([...store.keys()]).toEqual(['os.feed-settings']);
+  });
+});
+
 describe('isUnavailableCode', () => {
-  it('names the codes that mean the item is gone for this viewer', () => {
-    for (const c of ['content_not_found', 'stale_version', 'not_published', 'not_found']) {
+  it('names the codes that mean the item is gone for this viewer (not generic not_found)', () => {
+    for (const c of ['content_not_found', 'stale_version', 'not_published']) {
       expect(isUnavailableCode(c), c).toBe(true);
     }
-    for (const c of ['comments_disabled', 'rate_limited', 'csrf', undefined]) {
+    for (const c of ['not_found', 'comments_disabled', 'rate_limited', 'csrf', undefined]) {
       expect(isUnavailableCode(c), String(c)).toBe(false);
     }
   });

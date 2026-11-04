@@ -210,8 +210,14 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(prop
       onPause={onPause}
       onEnded={onEnded}
       onError={onError}
-      onTimeUpdate={(e: SyntheticEvent<HTMLVideoElement>) =>
-        onTimeMs?.(Math.floor(e.currentTarget.currentTime * 1000))
+      onTimeUpdate={(e: SyntheticEvent<HTMLVideoElement>) => {
+        // A timeupdate raised by a seek (before `seeked`) is not playback progress.
+        if (e.currentTarget.seeking) return;
+        onTimeMs?.(Math.floor(e.currentTarget.currentTime * 1000));
+      }}
+      onSeeking={(e: SyntheticEvent<HTMLVideoElement>) =>
+        // currentTime is already the target when `seeking` fires: move the continuity point now.
+        onSeeked?.(Math.floor(e.currentTarget.currentTime * 1000))
       }
       onSeeked={(e: SyntheticEvent<HTMLVideoElement>) =>
         onSeeked?.(Math.floor(e.currentTarget.currentTime * 1000))

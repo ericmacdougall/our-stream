@@ -8,9 +8,12 @@ import { updatePreferences, type Preferences } from '@/lib/m1b/api';
 import { Notice } from '../Notice';
 
 export function PreferencesForm({ initial }: { initial: Preferences | null }) {
-  const [digest, setDigest] = useState<Preferences['emailDigest']>(initial?.emailDigest ?? 'daily');
+  // null = the server copy could not be loaded: no option is shown as saved until a choice succeeds.
+  const [digest, setDigest] = useState<Preferences['emailDigest'] | null>(
+    initial?.emailDigest ?? null,
+  );
   const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initial ? null : t('prefs.unknown'));
   const [status, setStatus] = useState<string | null>(null);
   const inFlight = useRef(false);
 

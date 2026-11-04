@@ -93,12 +93,35 @@ export function reduceDraft(draft: Draft, event: DraftEvent): { draft: Draft; se
 }
 
 // ---- persistence (sessionStorage; the key travels with the text) ----
-export function draftStorageKey(contentId: string, parentId: string | null): string {
-  return `os.comment-draft.${contentId}.${parentId ?? 'root'}`;
+export const DRAFT_KEY_PREFIX = 'os.comment-draft.';
+
+/** Keyed by user as well: a draft typed before sign-out must never surface for the next person. */
+export function draftStorageKey(
+  userId: string,
+  contentId: string,
+  parentId: string | null,
+): string {
+  return `${DRAFT_KEY_PREFIX}${userId}.${contentId}.${parentId ?? 'root'}`;
+}
+
+/** Removes every persisted draft (sign-out on a shared browser). */
+export function clearDrafts(storage: Pick<Storage, 'length' | 'key' | 'removeItem'>): void {
+  const keys: string[] = [];
+  for (let i = 0; i < storage.length; i += 1) {
+    const k = storage.key(i);
+    if (k && k.startsWith(DRAFT_KEY_PREFIX)) keys.push(k);
+  }
+  for (const k of keys) storage.removeItem(k);
 }
 
 export function serialiseDraft(draft: Draft): string {
-  return JSON.stringify({ clientKey: draft.clientKey, body: draft.body, parentId: draft.parentId });
+  return JSON.stringify({
+    clientKey: draft.clientKey,
+    body: draft.body,
+    parentId: draft.parentId,
+    // Once sent at least once the text is frozen to its key; a reload must not reopen it.
+    sent: draft.phase !== 'editing',
+  });
 }
 
 /** A stored draft for the same parent, or a fresh one when the stored value is unusable. */
@@ -116,14 +139,16 @@ export function restoreDraft(
     return fresh;
   }
   if (!parsed || typeof parsed !== 'object') return fresh;
-  const p = parsed as { clientKey?: unknown; body?: unknown; parentId?: unknown };
+  const p = parsed as { clientKey?: unknown; body?: unknown; parentId?: unknown; sent?: unknown };
   if (typeof p.clientKey !== 'string' || p.clientKey === '' || p.clientKey.length > KEY_MAX) {
     return fresh;
   }
   if (typeof p.body !== 'string' || p.body.length > BODY_MAX) return fresh;
   const storedParent = p.parentId === null ? null : p.parentId;
   if (storedParent !== parentId) return fresh;
-  return { ...fresh, clientKey: p.clientKey, body: p.body };
+  const restored = { ...fresh, clientKey: p.clientKey, body: p.body };
+  // A draft that had been sent comes back frozen (Retry or Discard only), never editable.
+  return p.sent === true && p.body.trim() !== '' ? { ...restored, phase: 'uncertain' } : restored;
 }
 
 // ---- thread state ----
@@ -178,7 +203,8 @@ export function applyRemoved(
   });
 }
 
-const UNAVAILABLE = new Set(['content_not_found', 'stale_version', 'not_published', 'not_found']);
+// Generic not_found is excluded: an M1a-only server answers it for every M1b route.
+const UNAVAILABLE = new Set(['content_not_found', 'stale_version', 'not_published']);
 
 /** True when the server says the item is gone for this viewer (retracted, expired, revoked). */
 export function isUnavailableCode(code: string | undefined): boolean {

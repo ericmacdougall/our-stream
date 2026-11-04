@@ -118,6 +118,28 @@ test('/content/{id}?t= opens the player at that instant and reports engagement',
   await expect
     .poll(() => types(sent).filter((t) => t === 'view_start').length, { timeout: 10_000 })
     .toBe(1);
+  // A seek while playing (browsers raise timeupdate for the target before seeked) fires none of the
+  // thresholds it jumped over: pause at the start of a replay, then play and jump to 90 % at once.
+  await expect
+    .poll(() => video.evaluate((v: HTMLVideoElement) => v.ended), { timeout: 30_000 })
+    .toBe(true);
+  const beforeSeek = sent.length;
+  await video.evaluate((v: HTMLVideoElement) => {
+    v.currentTime = 0;
+    void v.play().then(() => {
+      v.currentTime = v.duration * 0.9;
+    });
+  });
+  await expect
+    .poll(() => types(sent.slice(beforeSeek)).filter((t) => t === 'complete').length, {
+      timeout: 30_000,
+    })
+    .toBe(1);
+  const replay = types(sent.slice(beforeSeek));
+  expect(replay).not.toContain('progress_25');
+  expect(replay).not.toContain('progress_50');
+  expect(replay.filter((t) => t === 'view_start')).toHaveLength(1);
+
   // Reactions and comments are available on the content page too.
   await expect(player.locator('..').getByTestId('like-button')).toBeVisible();
   await page.getByTestId('comments-button').click();

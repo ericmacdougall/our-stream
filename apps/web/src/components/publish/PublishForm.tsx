@@ -139,10 +139,11 @@ export function PublishForm({
           return;
         }
       }
-      if (pinOrgWide && canPinOrgWide) {
+      // A pin needs a published clip, so it is only offered when publishing now.
+      if (pinOrgWide && canPinOrgWide && publishAt === null) {
         const pinned = await pin(content.id, null);
         if (!pinned.ok) {
-          setError(pinned.message);
+          setError(pinned.code === 'not_published' ? t('pins.notPublished') : pinned.message);
           return;
         }
       }
@@ -159,7 +160,13 @@ export function PublishForm({
   const ready = content.currentVersion?.status === 'current';
 
   return (
-    <form onSubmit={(e) => void submit(e)} className="card form" noValidate aria-busy={pending}>
+    <form
+      method="post"
+      onSubmit={(e) => void submit(e)}
+      className="card form"
+      noValidate
+      aria-busy={pending}
+    >
       <h2>{t('publish.heading', { title: content.title })}</h2>
       {!ready ? <Notice kind="error">{t('publish.notReady')}</Notice> : null}
       <fieldset className="field" disabled={pending}>
@@ -235,7 +242,7 @@ export function PublishForm({
             {t(TAG_LABEL[tag])}
           </label>
         ))}
-        {canPinOrgWide ? (
+        {canPinOrgWide && mode === 'now' ? (
           <label className="inline">
             <input
               type="checkbox"

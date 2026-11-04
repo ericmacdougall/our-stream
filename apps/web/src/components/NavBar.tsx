@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { browserApi, errorCode } from '@/lib/api/client';
 import { clearAllCaches } from '@/lib/caches';
 import { errorMessage } from '@/lib/errors';
+import { clearDrafts } from '@/lib/m1b/comments';
 import { t } from '@/lib/i18n';
 import { useSession } from './SessionProvider';
 
@@ -66,6 +67,12 @@ export function NavBar() {
       return;
     }
     await clearAllCaches();
+    // Unsent comment drafts belong to this person: never leave them for the next sign-in.
+    try {
+      clearDrafts(sessionStorage);
+    } catch {
+      // Storage unavailable: nothing persisted to clear.
+    }
     router.push('/sign-in');
     router.refresh();
   }

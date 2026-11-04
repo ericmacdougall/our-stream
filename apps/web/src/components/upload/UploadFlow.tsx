@@ -149,7 +149,13 @@ export function UploadFlow({ replaceOf }: { replaceOf?: Detail }) {
   }
 
   return (
-    <form onSubmit={(e) => void submit(e)} className="card form" noValidate aria-busy={working}>
+    <form
+      method="post"
+      onSubmit={(e) => void submit(e)}
+      className="card form"
+      noValidate
+      aria-busy={working}
+    >
       <h2>{replaceOf ? t('upload.replaceHeading') : t('upload.heading')}</h2>
       {!replaceOf ? (
         <>

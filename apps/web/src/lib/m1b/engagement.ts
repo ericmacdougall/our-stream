@@ -41,6 +41,9 @@ export interface EngagementEvent {
   positionMs: number;
 }
 
+/** Largest gap between consecutive timeupdates that still counts as continuous playback. */
+const JUMP_MS = 2_000;
+
 const THRESHOLDS: readonly { type: MilestoneType; pct: number }[] = [
   { type: 'progress_25', pct: 25 },
   { type: 'progress_50', pct: 50 },
@@ -108,7 +111,11 @@ export function reduceEngagement(
       const next = { ...state, lastPositionMs: step.positionMs };
       if (!state.playing || !state.eligible || !state.sessionKey)
         return { state: next, events: [] };
-      if (prev === null || step.positionMs < prev) return { state: next, events: [] };
+      // Browsers emit timeupdate for the new position before seeked, so a jump larger than any
+      // playback tick only moves the continuity point: thresholds it skipped never fire.
+      if (prev === null || step.positionMs < prev || step.positionMs - prev > JUMP_MS) {
+        return { state: next, events: [] };
+      }
       if (state.durationMs === null || state.durationMs <= 0) return { state: next, events: [] };
       let out: Out = { state: next, events: [] };
       for (const { type, pct } of THRESHOLDS) {

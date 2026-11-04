@@ -217,9 +217,9 @@ services:
       context: ../..
       dockerfile: infra/docker/web.Dockerfile
       args:
-        # The edge routes /api and /media to the api before they reach web, so the production image is
-        # built without the Next.js rewrites: a misrouted request fails closed at web instead of web
-        # becoming an unintended hop to the api. `next dev` keeps its rewrites (WEB_PROXY_API unset).
+        # The edge routes /api and /media to the api before they reach web, so the image is built
+        # without the Next.js rewrites (the Dockerfile default): a misrouted request fails closed at
+        # web instead of web becoming an unintended hop. `next dev` keeps its rewrites.
         WEB_PROXY_API: 'false'
     environment:
       NODE_ENV: production

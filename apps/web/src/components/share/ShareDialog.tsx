@@ -157,7 +157,13 @@ export function ShareDialog({
           </div>
         </div>
       ) : (
-        <form onSubmit={(e) => void submit(e)} className="form" noValidate aria-busy={pending}>
+        <form
+          method="post"
+          onSubmit={(e) => void submit(e)}
+          className="form"
+          noValidate
+          aria-busy={pending}
+        >
           <div className="field">
             <label htmlFor="share-recipient">{t('share.recipient')}</label>
             <select

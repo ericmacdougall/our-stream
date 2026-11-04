@@ -1316,12 +1316,10 @@ route('PATCH', '/v1/org/settings', async ({ auth, body }) => {
 route('PATCH', '/v1/streams/:id', async ({ auth, params, body }) => {
   const s = streamOrThrow(params.id, auth.user);
   const role = streamRoleFor(s, auth.user);
-  const allowed =
-    role === 'moderator' ||
-    role === 'owner' ||
-    auth.user.role === 'owner' ||
-    auth.user.role === 'admin';
-  if (!allowed) throw new HttpError(403, 'forbidden', 'moderator or owner only');
+  // Same rule as the API: an org owner/admin or the stream's owner; moderators are refused.
+  const allowed = role === 'owner' || auth.user.role === 'owner' || auth.user.role === 'admin';
+  if (!allowed)
+    throw new HttpError(403, 'role_forbidden', 'requires an org admin or the stream owner');
   if (body.commentsEnabled !== undefined) {
     validate(typeof body.commentsEnabled === 'boolean', 'commentsEnabled');
     db.streamSettings.set(s.id, { commentsEnabled: body.commentsEnabled });

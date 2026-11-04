@@ -41,6 +41,11 @@ function InlinePlayer({ hit, tMs, onClose }: { hit: Hit; tMs: number; onClose: (
   });
   const start = Math.min(tMs, hit.durationMs ?? tMs);
   const headingId = `inline-player-${hit.id}`;
+  // A later "Play from" on the same hit seeks the existing player (same session) instead of
+  // remounting it, so no extra view_start is minted.
+  useEffect(() => {
+    if (seeked.current) handle.current?.seekToMs(start);
+  }, [start]);
   return (
     <div
       className="inline-player"
@@ -292,12 +297,7 @@ export function SearchResults({
                 {t('search.play')}
               </button>
             ) : (
-              <InlinePlayer
-                key={`${hit.id}:${playing.tMs}`}
-                hit={hit}
-                tMs={playing.tMs}
-                onClose={close}
-              />
+              <InlinePlayer key={hit.id} hit={hit} tMs={playing.tMs} onClose={close} />
             )}
           </li>
         ))}

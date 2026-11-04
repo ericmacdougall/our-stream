@@ -57,7 +57,7 @@ export function SignInForm({ nextPath }: { nextPath: string }) {
   }
 
   return (
-    <form onSubmit={(e) => void signIn(e)} className="card form" noValidate>
+    <form method="post" onSubmit={(e) => void signIn(e)} className="card form" noValidate>
       <h1>{t('auth.signIn.title')}</h1>
       <div className="field">
         <label htmlFor="email">{t('auth.email')}</label>

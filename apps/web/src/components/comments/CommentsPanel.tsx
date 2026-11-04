@@ -6,6 +6,7 @@
 // and then frozen behind a Retry button. The panel carries data-shortcuts-off so feed single-key
 // and arrow shortcuts stay off while the viewer types or reads here.
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useSession } from '@/components/SessionProvider';
 import { t } from '@/lib/i18n';
 import {
   COMMENT_PAGE,
@@ -68,7 +69,8 @@ function CommentForm({
   onUnavailable: () => void;
   onRefetch: () => void;
 }) {
-  const storageKey = draftStorageKey(contentId, parentId);
+  const me = useSession();
+  const storageKey = draftStorageKey(me?.user.id ?? 'anonymous', contentId, parentId);
   const [draft, setDraft] = useState<Draft>(() => newDraft(parentId, mintClientKey));
   const draftRef = useRef(draft);
   draftRef.current = draft;
@@ -142,7 +144,7 @@ function CommentForm({
   const sending = draft.phase === 'sending';
   const uncertain = draft.phase === 'uncertain';
   return (
-    <form onSubmit={submit} className="comment-form" aria-busy={sending} noValidate>
+    <form method="post" onSubmit={submit} className="comment-form" aria-busy={sending} noValidate>
       <label htmlFor={id} className="visually-hidden">
         {parentId ? t('comments.replyPlaceholder') : t('comments.placeholder')}
       </label>
