@@ -206,6 +206,9 @@ export async function dispatchEvent(db: Query, ctx: JobContext, ev: DomainEvent)
  * its own savepoint and marked processed on success; a failing event is logged and left for the next
  * drain without blocking the rest of the batch.
  */
+/** Events failing this many drains are parked (processed_at stays NULL) instead of retried forever. */
+export const MAX_EVENT_ATTEMPTS = 5;
+
 export async function drainOnce(
   ctx: JobContext,
   limit = 100,
@@ -217,8 +220,8 @@ export async function drainOnce(
     await client.query('BEGIN');
     const r = await client.query<DomainEvent>(
       `SELECT id, org_id, type, subject_type, subject_id, version_id, payload
-         FROM platform.domain_event WHERE processed_at IS NULL ORDER BY id LIMIT $1 FOR UPDATE SKIP LOCKED`,
-      [limit],
+         FROM platform.domain_event WHERE processed_at IS NULL AND attempts < $2 ORDER BY attempts, id LIMIT $1 FOR UPDATE SKIP LOCKED`,
+      [limit, MAX_EVENT_ATTEMPTS],
     );
     for (const ev of r.rows) {
       await client.query('SAVEPOINT ev');
@@ -232,6 +235,12 @@ export async function drainOnce(
         ctx.log.info({ eventId: ev.id, orgId: ev.org_id, type: ev.type, outcome }, 'outbox event');
       } catch (err) {
         await client.query('ROLLBACK TO SAVEPOINT ev');
+        // Count the attempt so a poison event cannot starve newer ones (F4); after MAX_EVENT_ATTEMPTS it
+        // stays unprocessed with its last error for an operator to inspect.
+        await client.query(
+          'UPDATE platform.domain_event SET attempts = attempts + 1, last_error = left($2, 500) WHERE id = $1',
+          [ev.id, (err as Error).message],
+        );
         failed += 1;
         ctx.log.error(
           { eventId: ev.id, orgId: ev.org_id, type: ev.type, err: (err as Error).message },

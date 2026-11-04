@@ -30,6 +30,8 @@ export function planHls(info: MediaInfo, input: string, outDir: string, opts: Hl
     '-y',
     '-threads',
     String(opts.threads),
+    '-protocol_whitelist',
+    'file,pipe,crypto,data',
     '-i',
     input,
   ];

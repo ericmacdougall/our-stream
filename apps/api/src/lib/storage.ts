@@ -6,6 +6,7 @@ import {
   AbortMultipartUploadCommand,
   CompleteMultipartUploadCommand,
   CreateBucketCommand,
+  PutBucketCorsCommand,
   CreateMultipartUploadCommand,
   GetObjectCommand,
   HeadBucketCommand,
@@ -73,6 +74,17 @@ function isNotFound(err: unknown): boolean {
   );
 }
 
+/** Origins allowed to upload directly: S3_CORS_ORIGINS or APP_BASE_URL plus its loopback twin. */
+export function corsOrigins(config: Config): string[] {
+  const explicit = config.S3_CORS_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean);
+  if (explicit.length > 0) return explicit;
+  const base = new URL(config.APP_BASE_URL);
+  const twin = base.hostname === 'localhost' ? '127.0.0.1' : base.hostname === '127.0.0.1' ? 'localhost' : null;
+  const out = [base.origin];
+  if (twin) out.push(`${base.protocol}//${twin}${base.port ? ':' + base.port : ''}`);
+  return out;
+}
+
 export function createS3Store(config: Config): ObjectStore {
   const client = new S3Client({
     endpoint: config.S3_ENDPOINT,
@@ -89,6 +101,24 @@ export function createS3Store(config: Config): ObjectStore {
         if (!isNotFound(err)) throw err;
         await client.send(new CreateBucketCommand({ Bucket }));
       }
+      // Browsers PUT upload parts straight to storage, so the bucket must answer CORS preflights for
+      // the web origin and expose ETag (needed to complete the multipart upload).
+      await client.send(
+        new PutBucketCorsCommand({
+          Bucket,
+          CORSConfiguration: {
+            CORSRules: [
+              {
+                AllowedOrigins: corsOrigins(config),
+                AllowedMethods: ['PUT', 'GET', 'HEAD'],
+                AllowedHeaders: ['*'],
+                ExposeHeaders: ['ETag'],
+                MaxAgeSeconds: 3600,
+              },
+            ],
+          },
+        }),
+      );
     },
     async createMultipartUpload(Key, ContentType) {
       const r = await client.send(new CreateMultipartUploadCommand({ Bucket, Key, ContentType }));

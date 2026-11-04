@@ -14,6 +14,9 @@ const Env = z.object({
   HOST: z.string().default('0.0.0.0'),
   DATABASE_URL: z.string().min(1),
   APP_BASE_URL: z.url().default('http://localhost:3000'),
+  // Browser origins allowed to PUT upload parts directly to object storage (comma separated); defaults to
+  // APP_BASE_URL plus its localhost/127.0.0.1 twin for development.
+  S3_CORS_ORIGINS: z.string().default(''),
   SOURCE_URL: z.url().default('https://github.com/ericmacdougall/our-stream'),
   GIT_COMMIT: z.string().default('unknown'),
   // Trust X-Forwarded-* only when a reverse proxy is in front (comma-separated hops/CIDRs, or 'true').

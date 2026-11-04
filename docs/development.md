@@ -96,3 +96,13 @@ Running the worker outside compose: `DATABASE_URL=... DATABASE_PLATFORM_URL=... 
 ## Permission rules
 
 The authorization rules live in `packages/authz` (`reference.ts` is the plain-TypeScript reference, `sql.ts` the generated predicates, `write-tuples.ts` the only tuple writer). Any change must extend `fixture.ts` and keep `matrix.integration.ts` green; see ADR-0002 and ADR-0012 for the rule-change procedure.
+
+## Database roles and SECURITY DEFINER functions
+
+Migrations run as the owner/admin role (`DATABASE_ADMIN_URL`). That role must be a superuser or carry
+`BYPASSRLS`: account, session, invite, notification and worker functions are `SECURITY DEFINER` and read
+tenant tables that enforce `FORCE ROW LEVEL SECURITY`, so an owner without bypass would see no rows and
+sign-in, invites and fan-out would silently return nothing. The schema lint fails when a tenant table is
+owned by a role without bypass. Object storage must answer CORS preflights from the web origin for direct
+multipart uploads; the API applies a bucket CORS rule at startup for `APP_BASE_URL` (override with
+`S3_CORS_ORIGINS`). Emailed magic links and invites point at `APP_BASE_URL/magic?token=...`.

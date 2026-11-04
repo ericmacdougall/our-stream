@@ -102,6 +102,7 @@ services:
     environment:
       <<: *app-env
       PORT: '4000'
+      TRUST_PROXY: uniquelocal # the web container forwards browser requests over the compose network
     ports:
       - '${BIND_ADDR:-127.0.0.1}:${API_PORT:-4000}:4000'
     depends_on:

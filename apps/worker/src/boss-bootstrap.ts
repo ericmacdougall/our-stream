@@ -11,25 +11,13 @@ import { dirname, join } from 'node:path';
 import { getConstructionPlans, getMigrationPlans } from 'pg-boss';
 import type pg from 'pg';
 
-const SCHEMA_RE = /^\s*CREATE\s+SCHEMA\s+IF\s+NOT\s+EXISTS\s+/i;
+const SCHEMA_LINE_RE = /^\s*CREATE\s+SCHEMA\s+IF\s+NOT\s+EXISTS\s+[^;]*;\s*$/gim;
 
-function splitStatements(plan: string): string[] {
-  // pg-boss plans are newline-joined statements; keep dollar-quoted bodies intact.
-  const out: string[] = [];
-  let buf = '';
-  let inDollar = false;
-  for (const line of plan.split('\n')) {
-    const dollars = (line.match(/\$\$/g) ?? []).length;
-    if (dollars % 2 === 1) inDollar = !inDollar;
-    buf += line + '\n';
-    if (!inDollar && line.trim().endsWith(';')) {
-      out.push(buf.trim());
-      buf = '';
-    }
-  }
-  if (buf.trim()) out.push(buf.trim());
-  return out;
+/** pg-boss plans are multi-statement SQL; strip only the schema statement and run the rest as one query. */
+export function withoutSchemaStatement(plan: string): string {
+  return plan.replace(SCHEMA_LINE_RE, '');
 }
+
 
 /** pg-boss publishes its schema version in package.json (`pgboss.schema`); the dist bundle does not export it. */
 export function targetSchemaVersion(): number {
@@ -64,10 +52,7 @@ export async function ensureBossSchema(
     );
     let result: 'created' | 'migrated' | 'current';
     if (hasVersion.rows[0]!.n === 0) {
-      for (const stmt of splitStatements(getConstructionPlans(schema))) {
-        if (SCHEMA_RE.test(stmt)) continue; // schema is pre-created by migration 0001 with the platform role as owner
-        await client.query(stmt);
-      }
+      await client.query(withoutSchemaStatement(getConstructionPlans(schema)));
       result = 'created';
     } else {
       const v = await client.query<{ version: number }>(`SELECT version FROM ${schema}.version`);
@@ -76,10 +61,7 @@ export async function ensureBossSchema(
       // construction plan installs before requesting a migration.
       const target = targetSchemaVersion();
       if (current < target) {
-        for (const stmt of splitStatements(getMigrationPlans(schema, current))) {
-          if (SCHEMA_RE.test(stmt)) continue;
-          await client.query(stmt);
-        }
+        await client.query(withoutSchemaStatement(getMigrationPlans(schema, current)));
         result = 'migrated';
       } else {
         result = 'current';

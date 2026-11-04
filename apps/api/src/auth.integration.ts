@@ -171,7 +171,7 @@ describe.skipIf(!integrationReady)('auth (integration)', () => {
     const known = await h.call('POST', '/v1/auth/magic-link', null, { email: owner.email });
     expect(known.status).toBe(200);
     const mail = h.mailer.lastTo(owner.email)!;
-    expect(mail.text).toContain('http://localhost:3000/auth/magic?token=');
+    expect(mail.text).toContain('http://localhost:3000/magic?token=');
     const token = decodeURIComponent(/token=([^\s&]+)/.exec(mail.text)![1]!);
 
     const first = await h.call('POST', '/v1/auth/magic-link/consume', null, { token });

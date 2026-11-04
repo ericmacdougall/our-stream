@@ -71,7 +71,9 @@ describe('tokens', () => {
     expect(mediaTokenValid(SECRET, parsed, VERSION, MEDIA_KEY_ID, exp)).toBe(false); // expired
     expect(mediaTokenValid(SECRET, parsed, CONTENT, MEDIA_KEY_ID, exp - 10)).toBe(false); // other version
     expect(mediaTokenValid(SECRET, parsed, VERSION, ORG, exp - 10)).toBe(false); // rotated key
-    expect(mediaTokenValid(SECRET, { ...parsed, userId: ORG }, VERSION, MEDIA_KEY_ID, exp - 10)).toBe(false);
+    expect(
+      mediaTokenValid(SECRET, { ...parsed, userId: ORG }, VERSION, MEDIA_KEY_ID, exp - 10),
+    ).toBe(false);
     expect(mediaTokenValid('x'.repeat(40), parsed, VERSION, MEDIA_KEY_ID, exp - 10)).toBe(false);
     expect(parseMediaToken('v1.not-a-uuid.1.sig')).toBeNull();
     expect(parseMediaToken(token.replace('v1.', 'v2.'))).toBeNull();

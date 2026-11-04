@@ -37,6 +37,7 @@ const APP_ALLOWED_FUNCTIONS = new Set([
   'platform_memberships_of',
   'platform_org_create',
   'platform_invite_accept',
+  'platform_account_set_password_if_unset',
 ]);
 
 export async function lintSchema(
@@ -170,6 +171,17 @@ export async function lintSchema(
     );
     for (const o of owned.rows)
       findings.push({ object: o.relname, problem: 'object owned by the application role' });
+
+    // SECURITY DEFINER functions read FORCE-RLS tables as the table owner, so the owner must bypass RLS
+    // (superuser or BYPASSRLS); otherwise login, invites and fan-out silently return nothing.
+    const owners = await client.query<{ rolname: string; ok: boolean }>(
+      `SELECT DISTINCT r.rolname, (r.rolbypassrls OR r.rolsuper) AS ok FROM pg_class c
+       JOIN pg_namespace n ON n.oid = c.relnamespace JOIN pg_roles r ON r.oid = c.relowner
+       WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')`,
+    );
+    for (const o of owners.rows) {
+      if (!o.ok) findings.push({ object: o.rolname, problem: 'tenant table owner cannot bypass RLS; SECURITY DEFINER functions would see no rows' });
+    }
 
     // Platform schema: the app role gets no table or sequence privileges there (definer functions mediate).
     const platformPrivs = await client.query<{ relname: string; relkind: string }>(

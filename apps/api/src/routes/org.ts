@@ -230,7 +230,7 @@ export function registerOrgRoutes(fastify: FastifyInstance, ctx: AppContext): vo
         auth.orgId,
         ctx.config.INVITE_LINK_TTL_DAYS * 24 * 60,
       );
-      const link = `${ctx.config.APP_BASE_URL}/auth/magic?token=${encodeURIComponent(token)}`;
+      const link = `${ctx.config.APP_BASE_URL}/magic?token=${encodeURIComponent(token)}`;
       await ctx.mailer.send(magicLinkMail(account.email, link, 'invite', orgName));
       return { ok: true as const };
     },

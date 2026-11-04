@@ -90,6 +90,8 @@ export async function probe(path: string, opts: { timeoutMs: number }): Promise<
   const { stdout } = await execTool(
     'ffprobe',
     [
+      '-protocol_whitelist',
+      'file,pipe,crypto,data',
       '-v',
       'error',
       '-print_format',

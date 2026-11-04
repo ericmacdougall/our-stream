@@ -48,6 +48,12 @@ export async function withPlatform<T>(
   }
 }
 
+/** F3: adopt an invited, password-less account at signup; false when a password already exists. */
+export async function accountSetPasswordIfUnset(client: Queryable, id: string, passwordHash: string): Promise<boolean> {
+  const r = await client.query<{ ok: boolean }>('SELECT platform_account_set_password_if_unset($1, $2) AS ok', [id, passwordHash]);
+  return r.rows[0]?.ok === true;
+}
+
 export async function accountByEmail(
   q: Queryable,
   emailNormalized: string,

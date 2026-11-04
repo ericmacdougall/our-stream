@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Fastify application factory. Routes are registered with Zod schemas so the OpenAPI document is
 // generated from the same definitions (ADR-0011). Personalised responses are private, no-store.
+import { createHash } from 'node:crypto';
 import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
@@ -85,7 +86,19 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     exposedHeaders: ['content-range', 'accept-ranges'],
   });
   await app.register(cookie);
-  await app.register(rateLimit, { max: 300, timeWindow: '1 minute' });
+  // Keyed by session when present so clients behind one proxy address (the web app's rewrite) do not
+  // share a budget; anonymous traffic stays keyed by client IP (honoured X-Forwarded-For via TRUST_PROXY).
+  await app.register(rateLimit, {
+    max: 300,
+    timeWindow: '1 minute',
+    keyGenerator: (req) => {
+      const cookie = req.headers.cookie ?? '';
+      const m = /(?:^|;\s*)os_session=([^;]+)/.exec(cookie);
+      const bearer = req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : null;
+      const cred = m?.[1] ?? bearer;
+      return cred ? `s:${createHash('sha256').update(cred).digest('base64url').slice(0, 24)}` : `ip:${req.ip}`;
+    },
+  });
   await app.register(swagger, {
     openapi: {
       openapi: '3.1.0',

@@ -28,6 +28,7 @@ import { conflict, unauthorized } from '../lib/errors.js';
 import { magicLinkMail } from '../lib/mailer.js';
 import {
   accountByEmail,
+  accountSetPasswordIfUnset,
   accountCreate,
   accountGet,
   inviteAccept,
@@ -114,18 +115,27 @@ export function registerAuthRoutes(fastify: FastifyInstance, ctx: AppContext): v
       const token = newSessionToken();
       const created = await withPlatform(ctx.pool, async (client) => {
         let userId: string;
-        try {
-          userId = await accountCreate(
-            client,
-            body.email.trim(),
-            emailNormalized,
-            body.displayName,
-            passwordHash,
-          );
-        } catch (err) {
-          if (isUniqueViolation(err))
+        // An invited address already has an account without a password: adopt it (F3). The lookup runs
+        // before the insert because a unique violation would abort the platform transaction.
+        const existing = await accountByEmail(client, emailNormalized);
+        if (existing) {
+          if (!(await accountSetPasswordIfUnset(client, existing.id, passwordHash)))
             throw conflict('email_taken', 'an account with this email already exists');
-          throw err;
+          userId = existing.id;
+        } else {
+          try {
+            userId = await accountCreate(
+              client,
+              body.email.trim(),
+              emailNormalized,
+              body.displayName,
+              passwordHash,
+            );
+          } catch (err) {
+            if (isUniqueViolation(err))
+              throw conflict('email_taken', 'an account with this email already exists');
+            throw err;
+          }
         }
         let orgId: string;
         try {
@@ -210,7 +220,7 @@ export function registerAuthRoutes(fastify: FastifyInstance, ctx: AppContext): v
           null,
           ctx.config.MAGIC_LINK_TTL_MINUTES,
         );
-        const link = `${ctx.config.APP_BASE_URL}/auth/magic?token=${encodeURIComponent(token)}`;
+        const link = `${ctx.config.APP_BASE_URL}/magic?token=${encodeURIComponent(token)}`;
         await ctx.mailer.send(magicLinkMail(account.email, link, 'login'));
       }
       return { ok: true as const };
