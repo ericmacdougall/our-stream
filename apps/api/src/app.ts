@@ -25,9 +25,13 @@ import { LoggingMailer, createSmtpMailer, type Mailer } from './lib/mailer.js';
 import { createS3Store, type ObjectStore } from './lib/storage.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerContentRoutes } from './routes/content.js';
+import { registerEngagementRoutes } from './routes/engagement.js';
 import { registerFeedRoutes } from './routes/feed.js';
 import { registerMediaRoutes } from './routes/media.js';
 import { registerOrgRoutes } from './routes/org.js';
+import { registerReactRoutes } from './routes/react.js';
+import { registerSearchRoutes } from './routes/search.js';
+import { registerSettingsRoutes } from './routes/settings.js';
 
 function parseTrustProxy(v: string): boolean | string {
   if (v === 'true') return true;
@@ -42,12 +46,33 @@ export interface AppDeps {
   version: string;
   mailer?: Mailer;
   store?: ObjectStore;
+  /** Test hook: receives every log line so suites can assert what never reaches the logs (R16). */
+  logSink?: { write(line: string): void };
+}
+
+/** Request serializer: search terms are personal data (ADR-0013 §6), so `q` never reaches the logs. */
+export function redactQueryTerms(url: string): string {
+  const i = url.indexOf('?');
+  if (i < 0) return url;
+  const params = new URLSearchParams(url.slice(i + 1));
+  if (!params.has('q')) return url;
+  params.set('q', '[redacted]');
+  return `${url.slice(0, i)}?${params.toString()}`;
 }
 
 export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   const app = Fastify({
     logger: {
       level: deps.config.LOG_LEVEL,
+      ...(deps.logSink ? { stream: deps.logSink } : {}),
+      serializers: {
+        req: (req) => ({
+          method: req.method,
+          url: redactQueryTerms(req.url ?? ''),
+          host: req.host,
+          remoteAddress: req.ip,
+        }),
+      },
       // Redact anything that could carry credentials or content (risk R16).
       redact: [
         'req.headers.authorization',
@@ -221,6 +246,10 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   registerContentRoutes(app, ctx);
   registerFeedRoutes(app, ctx);
   registerMediaRoutes(app, ctx);
+  registerReactRoutes(app, ctx);
+  registerSearchRoutes(app, ctx);
+  registerEngagementRoutes(app, ctx);
+  registerSettingsRoutes(app, ctx);
 
   return app;
 }

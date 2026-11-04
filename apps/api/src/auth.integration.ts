@@ -95,6 +95,7 @@ describe.skipIf(!integrationReady)('auth (integration)', () => {
     expect(ok.status).toBe(200);
     const token = (ok.body as { sessionToken: string }).sessionToken;
     expect(typeof token).toBe('string');
+    expect(ok.headers['set-cookie']).toBeUndefined(); // bearer transport never also sets the cookie
     const me = await h.call('GET', '/v1/me', null, undefined, { authorization: `Bearer ${token}` });
     expect(me.status).toBe(200);
     expect((me.body as { user: { id: string } }).user.id).toBe(owner.userId);

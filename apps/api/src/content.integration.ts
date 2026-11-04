@@ -3,13 +3,14 @@
 // scheduling, retraction, upload round trip and view recording.
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { buildFixture, readerVisible, type FixtureOrg } from '@our-stream/authz';
+import { buildFixture, readerVisible } from '@our-stream/authz';
 import { sha256 } from './lib/tokens.js';
 import {
   createHarness,
   createPlayableContent,
   createStream,
   integrationReady,
+  seedFixtureOrg,
   type Harness,
   type Session,
 } from './test-harness.js';
@@ -437,77 +438,3 @@ describe.skipIf(!integrationReady)('content, publish rules and feed (integration
     }
   });
 });
-
-/** Seeds one fixture org like packages/authz matrix.integration.ts, with playable current versions. */
-async function seedFixtureOrg(h: Harness, org: FixtureOrg): Promise<void> {
-  const admin = h.admin;
-  await admin.query(`SELECT set_config('app.org_id', $1, false)`, [org.orgId]);
-  await admin.query('INSERT INTO org (id, slug, name) VALUES ($1, $2, $2)', [org.orgId, org.slug]);
-  for (const m of org.memberships)
-    await admin.query(
-      'INSERT INTO org_membership (org_id, user_id, role, status) VALUES ($1, $2, $3, $4)',
-      [org.orgId, m.userId, m.role, m.status],
-    );
-  for (const g of org.groups)
-    await admin.query(
-      'INSERT INTO "group" (org_id, id, name, is_private) VALUES ($1, $2, $3, $4)',
-      [org.orgId, g.id, g.id, g.isPrivate],
-    );
-  for (const [name, id] of Object.entries(org.streamNames)) {
-    await admin.query(
-      'INSERT INTO stream (org_id, id, kind, slug, name) VALUES ($1, $2, $3, $4, $4)',
-      [
-        org.orgId,
-        id,
-        name === 'company' ? 'company' : name === 'department' ? 'department' : 'private',
-        name,
-      ],
-    );
-  }
-  for (const c of org.content) {
-    await admin.query(
-      `INSERT INTO content (org_id, id, kind, owner_id, title, state, publish_at, expires_at, retracted_at, review_requested)
-       VALUES ($1, $2, 'clip', $3, $4, $5, $6, $7, $8, $9)`,
-      [
-        org.orgId,
-        c.id,
-        c.ownerId,
-        `title ${c.id.slice(0, 8)}`,
-        c.state,
-        c.publishAt,
-        c.expiresAt,
-        c.retractedAt,
-        c.reviewRequested,
-      ],
-    );
-    const v = await admin.query<{ id: string }>(
-      `INSERT INTO content_version (org_id, content_id, status, assets) VALUES ($1, $2, $3, $4::jsonb) RETURNING id`,
-      [
-        org.orgId,
-        c.id,
-        c.state === 'retracted' ? 'retracted' : 'current',
-        JSON.stringify({ hls: { master: 'hls/master.m3u8' } }),
-      ],
-    );
-    await admin.query('UPDATE content SET current_version_id = $3 WHERE org_id = $1 AND id = $2', [
-      org.orgId,
-      c.id,
-      v.rows[0]!.id,
-    ]);
-  }
-  for (const t of org.tuples) {
-    await admin.query(
-      `INSERT INTO relation_tuple (org_id, object_type, object_id, relation, subject_type, subject_id, subject_relation) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-      [
-        org.orgId,
-        t.objectType,
-        t.objectId,
-        t.relation,
-        t.subjectType,
-        t.subjectId,
-        t.subjectRelation,
-      ],
-    );
-  }
-  await admin.query(`SELECT set_config('app.org_id', '', false)`);
-}

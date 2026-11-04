@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@our-stream/db": "workspace:*",
+    "@our-stream/notifications": "workspace:*",
     "@our-stream/pipeline": "workspace:*",
     "@our-stream/providers": "workspace:*",
     "pg": "8.23.1",

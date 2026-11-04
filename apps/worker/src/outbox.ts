@@ -172,6 +172,55 @@ export async function fanOutRetracted(db: Query, ev: DomainEvent): Promise<FanOu
   );
 }
 
+/**
+ * comment.created → the content owner (`commented`) and the root comment's author (`replied`), never the
+ * commenter; dedupe `comment:{commentId}` per recipient. Mentions are deferred (docs/decisions.md).
+ */
+export async function fanOutComment(db: Query, ev: DomainEvent): Promise<FanOutResult> {
+  const commentId = typeof ev.payload['commentId'] === 'string' ? ev.payload['commentId'] : null;
+  if (!commentId) return { recipients: 0, inserted: 0 };
+  const brief = await db.query<{
+    content_id: string;
+    author_id: string;
+    content_owner_id: string;
+    root_author_id: string | null;
+    state: string;
+  }>(
+    'SELECT content_id, author_id, content_owner_id, root_author_id, state FROM platform_comment_brief($1, $2)',
+    [ev.org_id, commentId],
+  );
+  const b = brief.rows[0];
+  if (!b || b.state !== 'visible') return { recipients: 0, inserted: 0 };
+  const targets: Array<{ user_id: string; reason: string }> = [];
+  if (b.content_owner_id !== b.author_id)
+    targets.push({ user_id: b.content_owner_id, reason: 'commented' });
+  if (
+    b.root_author_id &&
+    b.root_author_id !== b.author_id &&
+    b.root_author_id !== b.content_owner_id
+  )
+    targets.push({ user_id: b.root_author_id, reason: 'replied' });
+  let inserted = 0;
+  for (const t of targets) {
+    const res = await db.query<{ inserted: boolean }>(
+      'SELECT platform_notify($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb) AS inserted',
+      [
+        ev.org_id,
+        t.user_id,
+        'comment.created',
+        t.reason,
+        b.content_id,
+        null,
+        null,
+        `comment:${commentId}`,
+        JSON.stringify({ commentId }),
+      ],
+    );
+    if (res.rows[0]?.inserted) inserted += 1;
+  }
+  return { recipients: targets.length, inserted };
+}
+
 /** Routes one event. Throws to leave the event unprocessed for the next drain. */
 export async function dispatchEvent(db: Query, ctx: JobContext, ev: DomainEvent): Promise<string> {
   switch (ev.type) {
@@ -195,6 +244,10 @@ export async function dispatchEvent(db: Query, ctx: JobContext, ev: DomainEvent)
     case 'content.retracted': {
       const r = await fanOutRetracted(db, ev);
       return `retracted fan-out: ${r.inserted}/${r.recipients}`;
+    }
+    case 'comment.created': {
+      const r = await fanOutComment(db, ev);
+      return `comment fan-out: ${r.inserted}/${r.recipients}`;
     }
     default:
       return 'ignored: no handler';

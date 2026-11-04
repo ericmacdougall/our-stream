@@ -10,7 +10,8 @@ import {
   InviteRequest,
   MemberSummary,
   Ok,
-  Stream,
+  type Stream,
+  StreamM1b,
   Uuid,
 } from '@our-stream/contracts';
 import { withTenant } from '@our-stream/db';
@@ -30,6 +31,7 @@ type StreamRow = {
   slug: string;
   name: string;
   my_role: z.infer<typeof Stream>['myRole'];
+  comments_enabled: boolean;
 };
 
 export function registerOrgRoutes(fastify: FastifyInstance, ctx: AppContext): void {
@@ -37,13 +39,14 @@ export function registerOrgRoutes(fastify: FastifyInstance, ctx: AppContext): vo
 
   app.get(
     '/v1/streams',
-    { schema: { tags: ['org'], response: { 200: z.array(Stream) }, security } },
+    { schema: { tags: ['org'], response: { 200: z.array(StreamM1b) }, security } },
     async (req) => {
       const auth = requireMember(req);
       return withTenant(ctx.pool, { orgId: auth.orgId, userId: auth.userId }, async (client) => {
         // Private streams are listed only to members who hold a role on them.
         const r = await client.query<StreamRow>(
-          `SELECT s.id, s.kind, s.slug, s.name, usa.role AS my_role
+          `SELECT s.id, s.kind, s.slug, s.name, usa.role AS my_role,
+                  COALESCE((s.settings -> 'comments' ->> 'enabled') IS DISTINCT FROM 'false', true) AS comments_enabled
            FROM stream s LEFT JOIN user_stream_access usa
              ON usa.org_id = s.org_id AND usa.stream_id = s.id AND usa.user_id = $2
            WHERE s.org_id = $1 AND (s.kind <> 'private' OR usa.role IS NOT NULL)
@@ -56,6 +59,7 @@ export function registerOrgRoutes(fastify: FastifyInstance, ctx: AppContext): vo
           slug: s.slug,
           name: s.name,
           myRole: s.my_role,
+          commentsEnabled: s.comments_enabled,
         }));
       });
     },
@@ -63,7 +67,9 @@ export function registerOrgRoutes(fastify: FastifyInstance, ctx: AppContext): vo
 
   app.post(
     '/v1/streams',
-    { schema: { tags: ['org'], body: CreateStreamRequest, response: { 200: Stream }, security } },
+    {
+      schema: { tags: ['org'], body: CreateStreamRequest, response: { 200: StreamM1b }, security },
+    },
     async (req) => {
       // M1a: stream creation is an org owner/admin action; the creator becomes the stream owner.
       const auth = requireRole(req, ADMIN_ROLES);
@@ -98,6 +104,7 @@ export function registerOrgRoutes(fastify: FastifyInstance, ctx: AppContext): vo
           slug: req.body.slug,
           name: req.body.name,
           myRole: 'owner' as const,
+          commentsEnabled: true,
         };
       });
     },

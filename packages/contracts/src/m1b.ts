@@ -159,7 +159,8 @@ export const EngagementEventRequest = z.object({
   /** Client-generated playback session key (opaque, 1..64 chars); the idempotency key is (session, content, version, type). */
   sessionKey: z.string().min(1).max(64),
   type: EngagementType,
-  positionMs: Count.optional(),
+  /** Milliseconds into the clip; bounded to int4 (about 24 days). */
+  positionMs: z.number().int().min(0).max(2_147_483_647).optional(),
 });
 /**
  * `recorded` is false on a replay (same session, content, version and type) and once a user has used
