@@ -20,9 +20,9 @@ import type {
   StreamM1b,
   UpdateOrgSettingsRequest,
 } from '@our-stream/contracts';
-import { browserApi, errorCode } from '@/lib/api/client';
-import { describeError } from '@/lib/errors';
-import { t } from '@/lib/i18n';
+import { browserApi, errorCode } from '../api/client';
+import { describeError } from '../errors';
+import { t } from '../i18n';
 
 export type Result<T> =
   | { ok: true; data: T; status: number }
@@ -35,9 +35,26 @@ export type Result<T> =
     };
 
 interface RawResult<T> {
-  data?: T;
+  data?: T | undefined;
   error?: unknown;
   response?: Response | { status: number };
+}
+
+/** Pure classification of an openapi-fetch result (unit-tested); call() wraps it with the network catch. */
+export function classify<T>(result: RawResult<T>): Result<T> {
+  const status = result.response?.status;
+  if (status !== undefined && status >= 200 && status < 300 && result.error === undefined) {
+    // openapi-fetch yields data undefined for an empty body; no M1b route answers 204, so an empty
+    // 2xx (an edge or proxy answering for the API) is an unknown outcome, never a success.
+    if (result.data === undefined) {
+      return { ok: false, code: undefined, status, message: t('error.generic'), lost: true };
+    }
+    return { ok: true, data: result.data, status };
+  }
+  const raw = result.error === undefined ? 'unknown' : errorCode(result.error);
+  const code = raw === 'unknown' ? undefined : raw;
+  const lost = status === undefined || status >= 500 || (code === undefined && status < 400);
+  return { ok: false, code, status, message: describeError(code, status), lost };
 }
 
 async function call<T>(run: () => Promise<RawResult<T>>): Promise<Result<T>> {
@@ -53,14 +70,7 @@ async function call<T>(run: () => Promise<RawResult<T>>): Promise<Result<T>> {
       lost: true,
     };
   }
-  const status = result.response?.status;
-  if (status !== undefined && status >= 200 && status < 300 && result.error === undefined) {
-    return { ok: true, data: result.data as T, status };
-  }
-  const raw = result.error === undefined ? 'unknown' : errorCode(result.error);
-  const code = raw === 'unknown' ? undefined : raw;
-  const lost = status === undefined || status >= 500 || (code === undefined && status < 400);
-  return { ok: false, code, status, message: describeError(code, status), lost };
+  return classify(result);
 }
 
 export type Tag = z.output<typeof EventTag>;

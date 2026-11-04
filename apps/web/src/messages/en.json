@@ -178,6 +178,8 @@
 
   "publish.tags": "Event tags",
   "publish.pinOrgWide": "Pin organisation-wide after publishing",
+  "publish.tagsFailed": "Published. The event tags could not be saved; set them in the editor below.",
+  "publish.pinFailed": "Published. The organisation-wide pin could not be applied; pin it in the editor below.",
 
   "filters.label": "Feed filters",
   "filters.stream": "Stream",

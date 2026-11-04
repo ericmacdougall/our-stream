@@ -67,6 +67,9 @@ export function PublishForm({
     content.expiresAt ? isoToLocalDateTime(content.expiresAt) : '',
   );
   const [pending, setPending] = useState(false);
+  // Once the publish request succeeded the form is never resubmittable: a second POST would
+  // re-publish (publish_at bumped, audience notified again). Later steps navigate away instead.
+  const [published, setPublished] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inFlight = useRef(false);
 
@@ -79,7 +82,7 @@ export function PublishForm({
 
   async function submit(e: FormEvent) {
     e.preventDefault();
-    if (inFlight.current) return;
+    if (inFlight.current || published) return;
     setError(null);
     const groupIds = groupText
       .split(/[\s,]+/)
@@ -127,15 +130,18 @@ export function PublishForm({
         setError(message);
         return;
       }
+      setPublished(true);
       // M1b: tags and an org-wide pin are applied after the publish succeeded (a pin needs a
-      // published clip); a failure here leaves the clip published and reports the step.
+      // published clip). A failure here never returns to this form: the clip is published, so the
+      // person lands on its page with a one-shot notice naming the step the editors there repair.
       const initialTags = withM1bDefaults(content).tags;
       const tagsChanged =
         tags.length !== initialTags.length || tags.some((x) => !initialTags.includes(x));
       if (tagsChanged) {
         const tagged = await setTags(content.id, tags);
         if (!tagged.ok) {
-          setError(tagged.message);
+          router.push(`/content/${content.id}?step=tags`);
+          router.refresh();
           return;
         }
       }
@@ -143,7 +149,8 @@ export function PublishForm({
       if (pinOrgWide && canPinOrgWide && publishAt === null) {
         const pinned = await pin(content.id, null);
         if (!pinned.ok) {
-          setError(pinned.code === 'not_published' ? t('pins.notPublished') : pinned.message);
+          router.push(`/content/${content.id}?step=pin`);
+          router.refresh();
           return;
         }
       }
@@ -165,7 +172,7 @@ export function PublishForm({
       onSubmit={(e) => void submit(e)}
       className="card form"
       noValidate
-      aria-busy={pending}
+      aria-busy={pending || published}
     >
       <h2>{t('publish.heading', { title: content.title })}</h2>
       {!ready ? <Notice kind="error">{t('publish.notReady')}</Notice> : null}
@@ -304,7 +311,7 @@ export function PublishForm({
       </fieldset>
       <Notice kind="error">{error}</Notice>
       <div className="actions">
-        <button type="submit" className="primary" disabled={pending || !ready}>
+        <button type="submit" className="primary" disabled={published || pending || !ready}>
           {pending
             ? t('common.working')
             : mode === 'now'

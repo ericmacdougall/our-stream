@@ -22,9 +22,12 @@ export default async function ContentPage({
   // ?t=<ms> opens the player at that instant (search deep links, share links); invalid values ignored.
   const rawT = Array.isArray(query['t']) ? query['t'][0] : query['t'];
   const tMs = rawT !== undefined && /^\d{1,12}$/.test(rawT) ? Number(rawT) : null;
+  // ?step=tags|pin: the publish succeeded but that follow-up step failed (publish form hands over).
+  const rawStep = Array.isArray(query['step']) ? query['step'][0] : query['step'];
+  const step = rawStep === 'tags' || rawStep === 'pin' ? rawStep : null;
   return (
     <main id="main" className="page">
-      <ContentPanel initial={data} tMs={tMs} />
+      <ContentPanel initial={data} tMs={tMs} step={step} />
     </main>
   );
 }

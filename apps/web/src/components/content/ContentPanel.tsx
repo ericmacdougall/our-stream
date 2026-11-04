@@ -40,7 +40,15 @@ function audienceLabel(a: Detail['audience'][number]): string {
   }
 }
 
-export function ContentPanel({ initial, tMs = null }: { initial: Detail; tMs?: number | null }) {
+export function ContentPanel({
+  initial,
+  tMs = null,
+  step = null,
+}: {
+  initial: Detail;
+  tMs?: number | null;
+  step?: 'tags' | 'pin' | null;
+}) {
   const router = useRouter();
   const { detail: polled, setDetail } = useContentPolling(initial);
   const detail = polled ?? initial;
@@ -112,6 +120,9 @@ export function ContentPanel({ initial, tMs = null }: { initial: Detail; tMs?: n
           item={withM1bDefaults(detail)}
           tMs={tMs}
         />
+      ) : null}
+      {step ? (
+        <Notice>{t(step === 'tags' ? 'publish.tagsFailed' : 'publish.pinFailed')}</Notice>
       ) : null}
       <section className="card" aria-labelledby="content-status-heading">
         <h2 id="content-status-heading">{t('content.statusHeading')}</h2>

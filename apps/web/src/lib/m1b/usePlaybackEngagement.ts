@@ -86,8 +86,14 @@ export function usePlaybackEngagement(input: {
 
   const step = useCallback(
     (s: EngagementStep) => {
+      const before = stateRef.current.sessionKey;
       const out = reduceEngagement(stateRef.current, s, mintClientKey);
       stateRef.current = out.state;
+      // A new playback session (first play, or a replay after complete) gets its own /view record.
+      if (out.state.sessionKey !== before) {
+        viewStarted.current = false;
+        viewCompleted.current = false;
+      }
       for (const event of out.events) {
         if (event.type === 'view_start') void sendView(false);
         if (event.type === 'complete') void sendView(true);

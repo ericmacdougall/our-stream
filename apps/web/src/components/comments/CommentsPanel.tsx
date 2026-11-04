@@ -109,6 +109,7 @@ function CommentForm({
     try {
       const result = await createComment(contentId, payload);
       if (result.ok) {
+        inFlight.current = false;
         onPosted(result.data);
         apply({ type: 'sent' });
         return;
@@ -127,12 +128,13 @@ function CommentForm({
           ? { type: 'failed', definite, code: result.code }
           : { type: 'failed', definite }
         : { type: 'failed', definite };
+      // Release the guard before apply(): an automatic retry starts inside it and must own it.
       inFlight.current = false;
       apply(failed);
       if (draftRef.current.phase === 'uncertain') setError(t('comments.uncertain'));
-      return;
-    } finally {
+    } catch {
       inFlight.current = false;
+      setError(t('error.network'));
     }
   }
 
