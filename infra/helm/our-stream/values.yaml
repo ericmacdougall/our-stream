@@ -1,0 +1,234 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Default values for the our-stream chart. No credential is ever set here: every secret is a reference to a
+# Secret you create beforehand (`secrets`). docs/deployment.md explains the values, the client-address trust
+# chain and what the chart does not do. values.schema.json validates this file and your overrides.
+
+nameOverride: ''
+fullnameOverride: ''
+
+image:
+  # Images are <registry>/<repository>-api, -web and -worker (built from infra/docker/*.Dockerfile). No
+  # public images are published yet: build and push your own and point these at them.
+  registry: ghcr.io
+  repository: ericmacdougall/our-stream
+  # Defaults to the chart's appVersion.
+  tag: ''
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# Public origin of the web app (APP_BASE_URL). The API refuses a non-https value in production.
+appBaseUrl: https://stream.example.com
+
+secrets:
+  app:
+    # Secret with keys DATABASE_URL (ourstream_app role), DATABASE_PLATFORM_URL (ourstream_platform role),
+    # S3_ACCESS_KEY, S3_SECRET_KEY, SESSION_SECRET (>=32 chars), MEDIA_HMAC_SECRET (>=32 chars, different
+    # from SESSION_SECRET) and optionally SMTP_URL. Each workload reads only the keys it needs (explicit
+    # secretKeyRef, never envFrom): api gets no platform URL, worker gets no session secrets.
+    existingSecret: our-stream-app
+  migrate:
+    # Secret holding the admin (schema owner) connection string. Mounted by the migrate Job and nothing else.
+    # With the CloudNativePG option below, use the operator-generated `<fullname>-pg-app` Secret and key `uri`
+    # (for release `our-stream` that is `our-stream-pg-app`).
+    existingSecret: our-stream-migrate
+    key: DATABASE_ADMIN_URL
+
+objectStorage:
+  # S3-compatible endpoint. Browsers upload parts directly to it (presigned URLs), so it must be reachable from
+  # users' browsers as well as from the pods, and it must allow the `corsOrigins` below.
+  endpoint: https://s3.example.com
+  # Optional browser-facing endpoint used only to sign upload-part URLs (S3_PUBLIC_ENDPOINT); empty means
+  # `endpoint`, which then has to be reachable by browsers itself.
+  publicEndpoint: ''
+  region: us-east-1
+  bucket: ourstream
+  forcePathStyle: true
+  # Browser origins allowed to PUT upload parts; empty means appBaseUrl.
+  corsOrigins: []
+
+mail:
+  from: our-stream <no-reply@example.com>
+
+api:
+  # Rate budgets are per process (ADR-0004): N replicas means N x AUTH_RATE_LIMIT_MAX for an attacker who
+  # spreads requests, so stay at 1 until a shared store lands; the chart warns above 1.
+  replicaCount: 1
+  # TRUST_PROXY, as CIDRs only (`true`, `/0`, prefixes broader than /8 and IPv4-mapped IPv6 are rejected by
+  # the schema and the template). /api and /media are routed to the api at the Ingress, so the api's TCP peer
+  # is the ingress controller pod: list the address range those pods use. If that range also contains the web
+  # pods (a shared pod CIDR), the chain holds only because web cannot reach the api at all (NetworkPolicy)
+  # and /api and /media never reach web (the template refuses a routing that would); keep both on. Empty
+  # renders TRUST_PROXY=false and NOTES warn.
+  trustedProxyCidrs: []
+  logLevel: info
+  # Extra non-secret environment (name: value). Never put credentials here.
+  env: {}
+  service:
+    # Name of the api Service. Browser traffic reaches the api through the Ingress, but the web image's own
+    # rewrites (used by `next dev`) point at API_INTERNAL_URL fixed at build time (default http://api:4000);
+    # set this to `api` for one release per namespace, or build web with `--build-arg API_INTERNAL_URL`.
+    name: ''
+    port: 4000
+  resources:
+    requests: { cpu: 200m, memory: 256Mi }
+    limits: { memory: 512Mi }
+  autoscaling:
+    # Off until rate budgets have a shared store: scaling on load would multiply an attacker's budget.
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 1
+    targetCPUUtilizationPercentage: 70
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+web:
+  replicaCount: 2
+  service:
+    port: 3000
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 512Mi }
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 70
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+worker:
+  replicaCount: 1
+  logLevel: info
+  # ASR provider (ADR-0008): `fake` needs nothing; `whisper-http` needs whisperUrl.
+  asr:
+    provider: fake
+    whisperUrl: ''
+  # Deployment-wide provider policy (ADR-0008): self-host only, zero-data-retention required.
+  providerPolicy:
+    selfHostOnly: true
+    requireZdr: true
+  ffmpegThreads: 4
+  mediaMaxInputBytes: 4294967296
+  mediaConcurrency: 2
+  # Media scratch space (WORKER_TMP_DIR): an emptyDir with this size limit. Set `scratch.medium: Memory` only
+  # if the node has the RAM for the largest input.
+  scratch:
+    sizeLimit: 16Gi
+    medium: ''
+  env: {}
+  resources:
+    requests: { cpu: '1', memory: 1Gi }
+    limits: { memory: 4Gi }
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+migrate:
+  # Runs `node dist/cli.js migrate` from the api image as a pre-install/pre-upgrade hook with the admin URL
+  # (post-install when postgresql.cloudnativepg.enabled, because the Cluster does not exist earlier).
+  backoffLimit: 1
+  activeDeadlineSeconds: 900
+  waitForDatabaseSeconds: 300
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 512Mi }
+
+ingress:
+  enabled: true
+  className: ''
+  # /media goes to the api, `paths` go to web, and `api` below adds the prefix-stripping /api route (same
+  # shape as the compose edge). The controller must set X-Forwarded-For from the connection and not trust
+  # the client's header (ingress-nginx: use-forwarded-headers=false, the default).
+  annotations: {}
+  hosts:
+    - host: stream.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  # - secretName: stream-example-com-tls
+  #   hosts: [stream.example.com]
+  api:
+    # Second Ingress that strips /api before the api. Defaults are ingress-nginx's regex rewrite; set the
+    # annotations/path for your controller, or disable this and use gatewayApi.
+    enabled: true
+    path: /api(/|$)(.*)
+    pathType: ImplementationSpecific
+    annotations:
+      nginx.ingress.kubernetes.io/use-regex: 'true'
+      nginx.ingress.kubernetes.io/rewrite-target: /$2
+
+gatewayApi:
+  # Gateway API HTTPRoute (standard URLRewrite for /api) instead of the Ingress pair.
+  enabled: false
+  parentRefs: []
+  # - name: public-gateway
+  #   namespace: gateway-system
+
+networkPolicy:
+  # Default-deny ingress for every pod of the release; web and api accept only the ingress controller. Web is
+  # deliberately not allowed to reach the api: its build-time rewrites would otherwise forward a forged
+  # X-Forwarded-For from inside the trusted range. Egress is not restricted by this skeleton.
+  enabled: true
+  # Selects the namespace the ingress controller (or Gateway data plane) runs in. Must not be empty: an empty
+  # selector would match every namespace, so the template refuses it.
+  ingressNamespaceSelector:
+    kubernetes.io/metadata.name: ingress-nginx
+  # Optionally narrow to the controller's pods, e.g. {app.kubernetes.io/name: ingress-nginx}.
+  ingressPodSelector: {}
+
+serviceAccount:
+  create: true
+  name: ''
+  annotations: {}
+  automountServiceAccountToken: false
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+postgresql:
+  # In-cluster Postgres through the CloudNativePG operator (ADR-0011; the operator must be installed). Off by
+  # default: point DATABASE_* at a managed or operator-run Postgres with pgvector instead.
+  cloudnativepg:
+    enabled: false
+    instances: 1
+    # Must ship the pgvector extension.
+    imageName: ghcr.io/cloudnative-pg/postgresql:17
+    storage:
+      size: 20Gi
+      storageClass: ''
+    # The operator generates the owner (ourstream_admin) credentials itself in `<fullname>-pg-app` (keys
+    # username, password, uri, ...); point `secrets.migrate` at that Secret with key `uri`. The two application
+    # roles take their passwords from these kubernetes.io/basic-auth Secrets (keys username, password), which
+    # you create; the names must not collide with `<fullname>-pg-app`.
+    appRoleSecret: our-stream-pg-role-app
+    platformRoleSecret: our-stream-pg-role-platform
+
+devStorage:
+  # Single-replica SeaweedFS with its S3 gateway for evaluation clusters only (no replication, no backups).
+  enabled: false
+  image: chrislusf/seaweedfs:3.97
+  # Secret with key `s3.json` (SeaweedFS identities file, as in infra/docker/seaweedfs/s3.json).
+  existingSecret: our-stream-dev-s3
+  storage:
+    size: 20Gi
+    storageClass: ''
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 1Gi }

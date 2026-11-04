@@ -80,8 +80,13 @@ Migrations run as the owner/admin role (`DATABASE_ADMIN_URL`). The API and tenan
 
 ```sh
 docker compose -f infra/docker/docker-compose.yml up --build
-# web http://localhost:3000, api http://localhost:4000/health, mail http://localhost:8025, S3 http://localhost:8333
+# app http://localhost:3000 (Caddy edge in front of web and api), api http://localhost:4000/health,
+# mail http://localhost:8025, S3 http://localhost:8333
 ```
+
+`localhost:3000` is the `edge` service (Caddy): it sends `/api/*` and `/media/*` to the api and everything
+else to web, which publishes no host port of its own. Ports, network addresses and the client-address
+trust chain are described in `docs/deployment.md`.
 
 ## Worker and media pipeline
 
@@ -142,13 +147,15 @@ is not resolvable by a browser), otherwise against `S3_ENDPOINT`. Emailed magic 
 ## Proxies and rate limits
 
 `TRUST_PROXY` (default `false`) tells the API which upstream addresses may speak for the client via
-`X-Forwarded-For` (Fastify `trustProxy` syntax: `false`, `true`, a CIDR list or `uniquelocal`). Enable
-it only for hops that append their own peer to the header. Reverse proxies such as nginx
-(`$proxy_add_x_forwarded_for`), Traefik and Kubernetes ingresses do; the web app's Next.js rewrites
-(`/api/*`, `/media/*` to the API) do not: they forward the header exactly as the browser sent it. So
-with the compose stack and no ingress, `TRUST_PROXY` stays `false` and every browser request reaches the
-API from the web container's address. Behind an ingress that appends the peer, set `TRUST_PROXY` to
-the ingress and compose network CIDRs so `req.ip` is the real client.
+`X-Forwarded-For` (Fastify `trustProxy` syntax). Use a CIDR list naming exactly the proxy that sets the
+header from the connection, and nothing broader: not `true`, not `uniquelocal` (that would trust the Docker
+gateway, i.e. anything on the host), not a hop count. Reverse proxies such as Caddy, nginx
+(`$proxy_add_x_forwarded_for`), Traefik and Kubernetes ingress controllers set the header; the web app's
+Next.js rewrites (`/api/*`, `/media/*` to the API) do not: they forward it exactly as received, so web
+must never be a trusted hop. The compose stack therefore routes `/api` and `/media` at the Caddy edge
+straight to the API and sets `TRUST_PROXY` to the edge's static address (`docs/deployment.md`, "Trust
+chain"); the Helm chart does the same at the Ingress with `api.trustedProxyCidrs`. Running the API alone
+(`pnpm --filter @our-stream/api dev`) keeps `TRUST_PROXY=false`.
 
 Because of that, only unauthenticated traffic is budgeted by address. Everything else uses a key the
 server validated itself (`apps/api/src/lib/limits.ts`), so neither a rotated cookie nor a spoofed
@@ -167,9 +174,8 @@ address buys a fresh budget:
 | share-as-link                           | session id                              | `SHARE_RATE_LIMIT_MAX` (20)      |
 
 Budgets are in-memory per API process; a shared store is scheduled with multi-instance deployments
-(ADR-0004). When `TRUST_PROXY` is `false` behind the web container, the per-address budgets are shared
-by every browser user of that deployment, and one anonymous client can spend the sign-in budget for
-everyone. For an install with more than a handful of users, put a reverse proxy that appends the peer
-(Caddy, Traefik, nginx) in front of the web container and set `TRUST_PROXY` to its address, instead of
-raising `AUTH_RATE_LIMIT_MAX` and `IP_RATE_LIMIT_MAX` or trusting a hop that does not append its peer.
-The per-email budget protects accounts either way.
+(ADR-0004), and until then every extra API replica multiplies the per-address budgets. When `TRUST_PROXY`
+is `false` behind a proxy, the per-address budgets are shared by every user of that deployment and one
+anonymous client can spend the sign-in budget for everyone. Fix that by trusting the proxy that sets the
+header (as compose and the chart do), not by raising `AUTH_RATE_LIMIT_MAX` and `IP_RATE_LIMIT_MAX` or by
+trusting a hop that forwards the header unchanged. The per-email budget protects accounts either way.

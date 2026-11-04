@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Edge reverse proxy for the compose stack: the one origin browsers talk to (F2, docs/deployment.md).
+#
+# Trust chain. The edge is the only hop the api trusts (TRUST_PROXY=<edge address>/32). Caddy's
+# `trusted_proxies` list is intentionally empty, so a client-supplied X-Forwarded-For/-Proto/-Host is
+# discarded and X-Forwarded-For is set to the TCP peer; Forwarded and X-Real-IP are dropped as well. /api
+# and /media go straight to the api so the web container's Next.js rewrites, which forward X-Forwarded-For
+# unchanged, are never on the path the api trusts. Only the edge publishes a host port.
+#
+# Plain HTTP on :3000 behind the loopback host port. TLS for a public install is a Kubernetes Ingress
+# concern (docs/deployment.md); this evaluation stack does not terminate TLS.
+{
+	admin off
+	auto_https off
+}
+
+:3000 {
+	# The api answers /v1/*, /health and /media/*; the browser addresses it as /api/* on this origin.
+	handle_path /api/* {
+		reverse_proxy api:4000 {
+			header_up -Forwarded
+			header_up -X-Real-IP
+		}
+	}
+	handle /media/* {
+		reverse_proxy api:4000 {
+			header_up -Forwarded
+			header_up -X-Real-IP
+		}
+	}
+	handle {
+		reverse_proxy web:3000 {
+			header_up -Forwarded
+			header_up -X-Real-IP
+		}
+	}
+}

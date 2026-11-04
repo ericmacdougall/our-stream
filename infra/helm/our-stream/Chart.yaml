@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+apiVersion: v2
+name: our-stream
+description: our-stream platform (api, web, worker) with a migrate Job, Ingress and optional in-cluster dev dependencies
+type: application
+# version: chart packaging version. appVersion: the application release it deploys; ci/check.sh asserts it
+# equals the root package.json version so the chart tracks the repository.
+version: 0.1.0
+appVersion: '0.0.0'
+kubeVersion: '>=1.29.0-0'
+home: https://github.com/ericmacdougall/our-stream
+sources:
+  - https://github.com/ericmacdougall/our-stream
+keywords: [video, intranet, self-hosted]
+annotations:
+  licenses: AGPL-3.0-only

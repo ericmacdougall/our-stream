@@ -1,0 +1,65 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+{{- if .Values.postgresql.cloudnativepg.enabled }}
+{{- $pg := .Values.postgresql.cloudnativepg }}
+# In-cluster Postgres via the CloudNativePG operator (ADR-0011). Mirrors infra/docker/postgres/init/01-roles.sh:
+# the owner role (ourstream_admin) runs migrations; ourstream_app and ourstream_platform have LOGIN, no
+# BYPASSRLS and own nothing. Role passwords come from the referenced basic-auth Secrets, never from values.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ include "our-stream.fullname" . }}-pg
+  labels:
+    {{- include "our-stream.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+spec:
+  instances: {{ $pg.instances }}
+  imageName: {{ $pg.imageName | quote }}
+  storage:
+    size: {{ $pg.storage.size }}
+    {{- with $pg.storage.storageClass }}
+    storageClass: {{ . }}
+    {{- end }}
+  postgresql:
+    shared_preload_libraries: [pg_stat_statements]
+    parameters:
+      log_min_duration_statement: '500'
+  bootstrap:
+    initdb:
+      database: ourstream
+      owner: ourstream_admin
+      # No `secret`: the operator generates the owner credentials in `<cluster>-app` (key `uri`), which the
+      # migrate Job reads through secrets.migrate.
+      postInitApplicationSQL:
+        - CREATE EXTENSION IF NOT EXISTS vector
+        - CREATE EXTENSION IF NOT EXISTS pgcrypto
+        - >-
+          DO $$ BEGIN
+          IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ourstream_app') THEN
+          CREATE ROLE ourstream_app LOGIN NOBYPASSRLS NOSUPERUSER NOCREATEDB NOCREATEROLE; END IF;
+          IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ourstream_platform') THEN
+          CREATE ROLE ourstream_platform LOGIN NOBYPASSRLS NOSUPERUSER NOCREATEDB NOCREATEROLE; END IF;
+          END $$
+        - GRANT CONNECT ON DATABASE ourstream TO ourstream_app, ourstream_platform
+  managed:
+    roles:
+      - name: ourstream_app
+        ensure: present
+        login: true
+        superuser: false
+        createdb: false
+        createrole: false
+        bypassrls: false
+        inherit: true
+        passwordSecret:
+          name: {{ $pg.appRoleSecret }}
+      - name: ourstream_platform
+        ensure: present
+        login: true
+        superuser: false
+        createdb: false
+        createrole: false
+        bypassrls: false
+        inherit: true
+        passwordSecret:
+          name: {{ $pg.platformRoleSecret }}
+{{- end }}
