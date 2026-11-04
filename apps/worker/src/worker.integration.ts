@@ -69,6 +69,8 @@ describe.skipIf(!enabled)('worker (integration)', () => {
       store,
       asr: createFakeAsr(),
       limits: { ...limitsFromEnv({}), threads: 8, tmpRoot: join(work, 'tmp') },
+      mailer: { send: async () => undefined },
+      appBaseUrl: 'http://localhost:3000',
       log: {
         info: () => undefined,
         warn: () => undefined,

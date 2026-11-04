@@ -38,6 +38,13 @@ const APP_ALLOWED_FUNCTIONS = new Set([
   'platform_org_create',
   'platform_invite_accept',
   'platform_account_set_password_if_unset',
+  // M1b definer functions (migrations 0007-0010)
+  'comment_can_moderate',
+  'comment_remove',
+  'comment_report',
+  'platform_account_has_password',
+  'record_engagement',
+  'event_tags_valid',
 ]);
 
 export async function lintSchema(

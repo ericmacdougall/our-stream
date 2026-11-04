@@ -4,9 +4,12 @@
 // functions of migrations 0002/0003 with an explicit org id; the worker never holds a tenant context.
 import type pg from 'pg';
 import { withTenant } from '@our-stream/db';
+import type { Mailer } from '@our-stream/notifications';
 import type { ObjectStore, PipelineLimits } from '@our-stream/pipeline';
 import type { AsrProvider } from '@our-stream/providers';
 import { z } from 'zod';
+import { notifyDigest } from './digest.js';
+import { engagementRetention, searchPrune, searchReindex } from './maintenance.js';
 import { outboxDrain } from './outbox.js';
 import { mediaProcess } from './media.js';
 import { contentTransition } from './transition.js';
@@ -35,6 +38,10 @@ export interface JobContext {
   store: ObjectStore;
   asr: AsrProvider;
   limits: PipelineLimits;
+  /** Email channel (ADR-0005); a LoggingMailer when SMTP_URL is unset. */
+  mailer: Mailer;
+  /** Public web origin used for links in digests. */
+  appBaseUrl: string;
   log: Logger;
   now: () => Date;
 }
@@ -55,6 +62,10 @@ export const QUEUES = {
   mediaProcess: 'media.process',
   contentTransition: 'content.transition',
   tenantPing: 'tenant.ping',
+  notifyDigest: 'notify.digest',
+  engagementRetention: 'engagement.retention',
+  searchPrune: 'search.prune',
+  searchReindex: 'search.reindex',
 } as const;
 
 export const handlers: Record<string, Handler> = {
@@ -62,4 +73,8 @@ export const handlers: Record<string, Handler> = {
   [QUEUES.mediaProcess]: mediaProcess,
   [QUEUES.contentTransition]: contentTransition,
   [QUEUES.tenantPing]: tenantPing,
+  [QUEUES.notifyDigest]: notifyDigest,
+  [QUEUES.engagementRetention]: engagementRetention,
+  [QUEUES.searchPrune]: searchPrune,
+  [QUEUES.searchReindex]: searchReindex,
 };

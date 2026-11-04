@@ -3,13 +3,14 @@
 // scheduling, retraction, upload round trip and view recording.
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { buildFixture, readerVisible, type FixtureOrg } from '@our-stream/authz';
+import { buildFixture, readerVisible } from '@our-stream/authz';
 import { sha256 } from './lib/tokens.js';
 import {
   createHarness,
   createPlayableContent,
   createStream,
   integrationReady,
+  seedFixtureOrg,
   type Harness,
   type Session,
 } from './test-harness.js';
@@ -47,6 +48,39 @@ describe.skipIf(!integrationReady)('content, publish rules and feed (integration
   });
   afterAll(async () => {
     await h.cleanup();
+  });
+
+  it('GET /v1/streams/:id/members lists effective members with roles; private streams are hidden from non-members (GoodQA #35633)', async () => {
+    const r = await h.call('GET', `/v1/streams/${dept}/members`, member);
+    expect(r.status).toBe(200);
+    const items = (
+      r.body as { items: Array<{ userId: string; displayName: string; role: string }> }
+    ).items;
+    expect(items.find((m) => m.userId === contributor.userId)).toMatchObject({
+      role: 'contributor',
+    });
+    expect(items.find((m) => m.userId === member.userId)).toMatchObject({ role: 'viewer' });
+    expect(items.find((m) => m.userId === owner.userId)).toMatchObject({ role: 'owner' });
+    expect(items.every((m) => typeof m.displayName === 'string' && m.displayName.length > 0)).toBe(
+      true,
+    );
+    expect(items.some((m) => m.userId === outsider.userId)).toBe(false);
+    // A department stream is listable by any member; a private stream only by its members.
+    expect((await h.call('GET', `/v1/streams/${dept}/members`, outsider)).status).toBe(200);
+    const secret = await createStream(h, owner, 'secret', 'private', [
+      { session: member, role: 'viewer' },
+    ]);
+    const asMember = await h.call('GET', `/v1/streams/${secret}/members`, member);
+    expect(asMember.status).toBe(200);
+    expect(
+      (asMember.body as { items: Array<{ userId: string }> }).items.map((m) => m.userId).sort(),
+    ).toEqual([owner.userId, member.userId].sort());
+    const asOutsider = await h.call('GET', `/v1/streams/${secret}/members`, outsider);
+    expect(asOutsider.status).toBe(404);
+    expect(errorCode(asOutsider.body)).toBe('stream_not_found');
+    const unknown = await h.call('GET', `/v1/streams/${randomUUID()}/members`, owner);
+    expect(unknown.status).toBe(404);
+    expect(errorCode(unknown.body)).toBe('stream_not_found');
   });
 
   it('members cannot create content; contributors create drafts owned by themselves', async () => {
@@ -92,11 +126,11 @@ describe.skipIf(!integrationReady)('content, publish rules and feed (integration
     expect(byMember.status).toBe(404);
 
     // Contributor on dept, but only a viewer on the company stream.
-    const streams = (await h.call('GET', '/v1/streams', contributor)).body as Array<{
-      id: string;
-      kind: string;
-      myRole: string | null;
-    }>;
+    const streamsRes = await h.call('GET', '/v1/streams', contributor);
+    expect(Array.isArray(streamsRes.body)).toBe(false); // { items } per the frozen contract (GoodQA #35633)
+    const streams = (
+      streamsRes.body as { items: Array<{ id: string; kind: string; myRole: string | null }> }
+    ).items;
     const company = streams.find((s) => s.kind === 'company')!;
     expect(company.myRole).toBe('viewer');
     const toCompany = await h.call('POST', `/v1/content/${contentId}/publish`, contributor, {
@@ -437,77 +471,3 @@ describe.skipIf(!integrationReady)('content, publish rules and feed (integration
     }
   });
 });
-
-/** Seeds one fixture org like packages/authz matrix.integration.ts, with playable current versions. */
-async function seedFixtureOrg(h: Harness, org: FixtureOrg): Promise<void> {
-  const admin = h.admin;
-  await admin.query(`SELECT set_config('app.org_id', $1, false)`, [org.orgId]);
-  await admin.query('INSERT INTO org (id, slug, name) VALUES ($1, $2, $2)', [org.orgId, org.slug]);
-  for (const m of org.memberships)
-    await admin.query(
-      'INSERT INTO org_membership (org_id, user_id, role, status) VALUES ($1, $2, $3, $4)',
-      [org.orgId, m.userId, m.role, m.status],
-    );
-  for (const g of org.groups)
-    await admin.query(
-      'INSERT INTO "group" (org_id, id, name, is_private) VALUES ($1, $2, $3, $4)',
-      [org.orgId, g.id, g.id, g.isPrivate],
-    );
-  for (const [name, id] of Object.entries(org.streamNames)) {
-    await admin.query(
-      'INSERT INTO stream (org_id, id, kind, slug, name) VALUES ($1, $2, $3, $4, $4)',
-      [
-        org.orgId,
-        id,
-        name === 'company' ? 'company' : name === 'department' ? 'department' : 'private',
-        name,
-      ],
-    );
-  }
-  for (const c of org.content) {
-    await admin.query(
-      `INSERT INTO content (org_id, id, kind, owner_id, title, state, publish_at, expires_at, retracted_at, review_requested)
-       VALUES ($1, $2, 'clip', $3, $4, $5, $6, $7, $8, $9)`,
-      [
-        org.orgId,
-        c.id,
-        c.ownerId,
-        `title ${c.id.slice(0, 8)}`,
-        c.state,
-        c.publishAt,
-        c.expiresAt,
-        c.retractedAt,
-        c.reviewRequested,
-      ],
-    );
-    const v = await admin.query<{ id: string }>(
-      `INSERT INTO content_version (org_id, content_id, status, assets) VALUES ($1, $2, $3, $4::jsonb) RETURNING id`,
-      [
-        org.orgId,
-        c.id,
-        c.state === 'retracted' ? 'retracted' : 'current',
-        JSON.stringify({ hls: { master: 'hls/master.m3u8' } }),
-      ],
-    );
-    await admin.query('UPDATE content SET current_version_id = $3 WHERE org_id = $1 AND id = $2', [
-      org.orgId,
-      c.id,
-      v.rows[0]!.id,
-    ]);
-  }
-  for (const t of org.tuples) {
-    await admin.query(
-      `INSERT INTO relation_tuple (org_id, object_type, object_id, relation, subject_type, subject_id, subject_relation) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-      [
-        org.orgId,
-        t.objectType,
-        t.objectId,
-        t.relation,
-        t.subjectType,
-        t.subjectId,
-        t.subjectRelation,
-      ],
-    );
-  }
-  await admin.query(`SELECT set_config('app.org_id', '', false)`);
-}

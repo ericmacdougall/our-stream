@@ -1,0 +1,79 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Email channel adapter (ADR-0005 §4, ADR-0011: a fake for every adapter). Plain text only: digests
+// carry titles the recipient may currently read and nothing else, so there is nothing to render as HTML.
+import { createHash } from 'node:crypto';
+import nodemailer from 'nodemailer';
+
+export interface MailMessage {
+  to: string;
+  subject: string;
+  text: string;
+}
+
+export interface Mailer {
+  send(message: MailMessage): Promise<void>;
+}
+
+/**
+ * Records messages; `failNext(n)` makes the next n sends throw, `failNextTo(address)` makes the next
+ * send to that address throw (deterministic digest retry tests when other orgs share the run).
+ */
+export class FakeMailer implements Mailer {
+  readonly sent: MailMessage[] = [];
+  private failures = 0;
+  private readonly failAddresses = new Set<string>();
+  failNext(n: number): void {
+    this.failures = n;
+  }
+  failNextTo(address: string): void {
+    this.failAddresses.add(address);
+  }
+  async send(message: MailMessage): Promise<void> {
+    if (this.failAddresses.delete(message.to)) {
+      throw new Error('fake mailer: simulated SMTP failure');
+    }
+    if (this.failures > 0) {
+      this.failures -= 1;
+      throw new Error('fake mailer: simulated SMTP failure');
+    }
+    this.sent.push(message);
+  }
+  to(address: string): MailMessage[] {
+    return this.sent.filter((m) => m.to === address);
+  }
+}
+
+/** Stable, non-reversible handle for an address so logs never carry the address itself (R16). */
+export function addressHandle(to: string): string {
+  return createHash('sha256').update(to.trim().toLowerCase()).digest('hex').slice(0, 12);
+}
+
+/** Replaces anything that looks like an email address, for SMTP error messages that echo the recipient. */
+export function redactAddresses(text: string): string {
+  return text.replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '[email]');
+}
+
+/** Without SMTP_URL the worker logs that a digest was skipped (address handle and subject only, never content). */
+export class LoggingMailer implements Mailer {
+  constructor(private readonly log: { warn: (o: object, msg?: string) => void }) {}
+  async send(message: MailMessage): Promise<void> {
+    this.log.warn(
+      { toHandle: addressHandle(message.to), subject: message.subject },
+      'SMTP_URL not configured; message not delivered',
+    );
+  }
+}
+
+export function createSmtpMailer(smtpUrl: string, from: string): Mailer {
+  const transport = nodemailer.createTransport(smtpUrl);
+  return {
+    async send(message) {
+      await transport.sendMail({
+        from,
+        to: message.to,
+        subject: message.subject,
+        text: message.text,
+      });
+    },
+  };
+}

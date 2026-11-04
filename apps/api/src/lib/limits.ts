@@ -45,6 +45,14 @@ export interface Limiters {
   media: FixedWindowLimiter;
   /** Signup, login and magic-link requests, by the normalised email they act on. */
   email: FixedWindowLimiter;
+  /** M1b mutations other than comments and shares (likes, engagement, pins, tags, settings), by session id. */
+  write: FixedWindowLimiter;
+  /** Comment creation, by session id (review F17). */
+  comment: FixedWindowLimiter;
+  /** Keyword search, by session id (bounds full-text cost). */
+  search: FixedWindowLimiter;
+  /** Share-as-link attempts, by session id (ADR-0002 oracle stays slow and audited). */
+  share: FixedWindowLimiter;
 }
 
 export function createLimiters(config: Config): Limiters {
@@ -54,5 +62,9 @@ export function createLimiters(config: Config): Limiters {
     session: new FixedWindowLimiter({ max: config.SESSION_RATE_LIMIT_MAX, windowMs }),
     media: new FixedWindowLimiter({ max: config.MEDIA_RATE_LIMIT_MAX, windowMs }),
     email: new FixedWindowLimiter({ max: config.AUTH_EMAIL_RATE_LIMIT_MAX, windowMs }),
+    write: new FixedWindowLimiter({ max: config.WRITE_RATE_LIMIT_MAX, windowMs }),
+    comment: new FixedWindowLimiter({ max: config.COMMENT_RATE_LIMIT_MAX, windowMs }),
+    search: new FixedWindowLimiter({ max: config.SEARCH_RATE_LIMIT_MAX, windowMs }),
+    share: new FixedWindowLimiter({ max: config.SHARE_RATE_LIMIT_MAX, windowMs }),
   };
 }

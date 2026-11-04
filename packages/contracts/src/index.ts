@@ -40,8 +40,9 @@ export type ErrorResponse = z.infer<typeof ErrorResponse>;
 export const StreamKind = z.enum(['company', 'department', 'team', 'project', 'private']);
 export const ContentKind = z.enum(['clip', 'audio', 'document', 'page', 'link']);
 export const ContentState = z.enum(['draft', 'published', 'retracted']);
-export const EventTag = z.enum(['onboarding', 'announcement', 'current-events', 'training']);
 
 export * from './m1a.js';
+export * from './m1b.js';
 export type { M1aPaths, StreamMember } from './m1a-paths.js';
+export type { M1bPaths } from './m1b-paths.js';
 export { createClient, type ApiClient, type ApiPaths } from './client.js';

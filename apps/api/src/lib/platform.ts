@@ -84,6 +84,12 @@ export async function accountByEmail(
     : null;
 }
 
+/** Whether the account has a password (never the hash); for the account page and the set-password pre-check. */
+export async function accountHasPassword(q: Queryable, id: string): Promise<boolean> {
+  const r = await q.query<{ ok: boolean }>('SELECT platform_account_has_password($1) AS ok', [id]);
+  return r.rows[0]?.ok === true;
+}
+
 export async function accountGet(q: Queryable, id: string): Promise<Account | null> {
   const r = await q.query<{ id: string; email: string; display_name: string }>(
     'SELECT id, email, display_name FROM platform_account_get($1)',

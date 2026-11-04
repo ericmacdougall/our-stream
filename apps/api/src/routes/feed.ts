@@ -6,9 +6,9 @@ import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { readerVisibleSql } from '@our-stream/authz';
 import {
-  type FeedItem,
-  FeedQuery,
-  FeedResponse,
+  type FeedItemM1b,
+  FeedQueryM1b,
+  FeedResponseM1b,
   NotificationList,
   Ok,
   SyncResponse,
@@ -19,10 +19,19 @@ import type { AppContext } from '../context.js';
 import { requireMember } from '../lib/auth.js';
 import { decodeCursor, encodeCursor } from '../lib/cursor.js';
 import { badRequest, forbidden, notFound } from '../lib/errors.js';
+import {
+  commentCountSql,
+  likeCountSql,
+  likedSql,
+  pinnedSql,
+  streamFilterSql,
+  tagFilterSql,
+  viewerStreamsSql,
+} from '../lib/m1b-sql.js';
 import { feedMedia } from '../lib/media.js';
 
 const security = [{ cookieAuth: [] }, { bearerAuth: [] }];
-type Item = z.infer<typeof FeedItem>;
+type Item = z.infer<typeof FeedItemM1b>;
 
 interface FeedRow {
   id: string;
@@ -43,6 +52,11 @@ interface FeedRow {
   streams: Array<{ id: string; name: string; kind: Item['streams'][number]['kind'] }>;
   viewed: boolean;
   content_epoch: string;
+  tags: Item['tags'];
+  pinned: boolean;
+  like_count: number;
+  liked: boolean;
+  comment_count: number;
 }
 
 export function registerFeedRoutes(fastify: FastifyInstance, ctx: AppContext): void {
@@ -51,7 +65,12 @@ export function registerFeedRoutes(fastify: FastifyInstance, ctx: AppContext): v
   app.get(
     '/v1/feed',
     {
-      schema: { tags: ['feed'], querystring: FeedQuery, response: { 200: FeedResponse }, security },
+      schema: {
+        tags: ['feed'],
+        querystring: FeedQueryM1b,
+        response: { 200: FeedResponseM1b },
+        security,
+      },
     },
     async (req) => {
       const auth = requireMember(req);
@@ -63,23 +82,21 @@ export function registerFeedRoutes(fastify: FastifyInstance, ctx: AppContext): v
         if (!epochs.active) throw forbidden('not_member', 'membership is not active');
         const r = await client.query<FeedRow>(
           `SELECT c.id, c.kind, c.title, c.description, c.language, c.links, c.chapters, c.publish_at, c.owner_id,
-                  a.display_name AS owner_name, c.content_epoch::text,
+                  a.display_name AS owner_name, c.content_epoch::text, c.event_tags AS tags,
                   v.id AS version_id, v.duration_ms, v.width, v.height, v.assets,
                   EXISTS (SELECT 1 FROM user_content_state s WHERE s.org_id = c.org_id AND s.user_id = $2 AND s.content_id = c.id
                           AND s.first_viewed_at IS NOT NULL) AS viewed,
-                  COALESCE((SELECT json_agg(json_build_object('id', s.id, 'name', s.name, 'kind', s.kind) ORDER BY s.name)
-                            FROM content_audience au
-                            JOIN stream s ON s.org_id = au.org_id AND s.id = au.principal_id
-                            JOIN user_stream_access usa ON usa.org_id = au.org_id AND usa.stream_id = au.principal_id AND usa.user_id = $2
-                            WHERE au.org_id = c.org_id AND au.content_id = c.id AND au.kind = 'stream'), '[]'::json) AS streams
+                  ${viewerStreamsSql('c', '$2')} AS streams,
+                  ${pinnedSql('c', '$2')} AS pinned, ${likeCountSql('c')} AS like_count, ${likedSql('c', '$2')} AS liked,
+                  ${commentCountSql('c')} AS comment_count
            FROM content c
            JOIN content_version v ON v.org_id = c.org_id AND v.id = c.current_version_id AND v.status = 'current'
            LEFT JOIN LATERAL platform_account_get(c.owner_id) a ON true
            WHERE c.org_id = $1 AND c.kind IN ('clip', 'audio') AND v.assets ? 'hls'
              AND ${readerVisibleSql({ org: '$1', user: '$2' })}
-             AND ($3::uuid IS NULL OR (
-                   EXISTS (SELECT 1 FROM user_stream_access usa WHERE usa.org_id = $1 AND usa.user_id = $2 AND usa.stream_id = $3)
-                   AND EXISTS (SELECT 1 FROM content_audience au WHERE au.org_id = c.org_id AND au.content_id = c.id AND au.kind = 'stream' AND au.principal_id = $3)))
+             AND ${streamFilterSql('c', '$1', '$2', '$3')}
+             AND ${tagFilterSql('c', '$7')}
+             AND (NOT $8::boolean OR ${pinnedSql('c', '$2')})
              AND ($4::timestamptz IS NULL OR (c.publish_at, c.id) < ($4::timestamptz, $5::uuid))
            ORDER BY c.publish_at DESC, c.id DESC
            LIMIT $6`,
@@ -90,6 +107,8 @@ export function registerFeedRoutes(fastify: FastifyInstance, ctx: AppContext): v
             cursor?.publishAt ?? null,
             cursor?.id ?? null,
             q.limit + 1,
+            q.tag ?? null,
+            q.pinned === true,
           ],
         );
         const rows = r.rows.slice(0, q.limit);
@@ -120,6 +139,11 @@ export function registerFeedRoutes(fastify: FastifyInstance, ctx: AppContext): v
             streams: row.streams,
             viewed: row.viewed,
             contentEpoch: Number(row.content_epoch),
+            tags: row.tags,
+            pinned: row.pinned,
+            likeCount: row.like_count,
+            liked: row.liked,
+            commentCount: row.comment_count,
           });
         }
         const last = rows[rows.length - 1];

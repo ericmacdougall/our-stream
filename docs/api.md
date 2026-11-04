@@ -1,7 +1,7 @@
-# API (M1a): sessions, CSRF, uploads, publishing, feed and media
+# API: sessions, CSRF, uploads, publishing, feed, media (M1a); reactions, comments, search, engagement, pins (M1b)
 
 The API in `apps/api` is the single authorization surface (ADR-0011). Every route is declared with the
-Zod schemas in `packages/contracts/src/m1a.ts`, so `pnpm contracts:generate` regenerates the typed
+Zod schemas in `packages/contracts/src/m1a.ts` and `m1b.ts`, so `pnpm contracts:generate` regenerates the typed
 client from the live OpenAPI document (`GET /openapi.json`). This page documents the behaviour that is
 not visible in the schemas.
 
@@ -65,6 +65,11 @@ An invited user signs in through the emailed link and may then choose a password
   deferred.) Private streams are listed only to members holding a role on them.
 - `POST /v1/streams/:id/grants` writes one tuple through `writeTuple`; rule violations map to 403 with the
   rule code (`stream_owner_required`, `bad_subject`, ...), missing streams/groups to 404.
+- `GET /v1/streams`, `GET /v1/members` and `GET /v1/streams/:id/members` answer `{ items: [...] }` as the
+  frozen contract declares (the M1a routes answered bare arrays, GoodQA #35633). Stream members are the
+  effective members from `user_stream_access` (highest role, including access through groups and the
+  everyone grant) who are active; a private stream's members are listable only by members holding a role
+  on it (404 `stream_not_found` otherwise), like the stream list.
 
 ## Content lifecycle
 
@@ -136,11 +141,13 @@ Worker contract: asset values in `content_version.assets` (`hls.master`, `poster
 
 ## Configuration (`apps/api/src/config.ts`)
 
-`DATABASE_URL`, `APP_BASE_URL`, `TRUST_PROXY`, `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY`,
+`DATABASE_URL`, `APP_BASE_URL`, `TRUST_PROXY`, `S3_ENDPOINT`, `S3_PUBLIC_ENDPOINT` (browser-reachable
+endpoint used only to presign upload-part URLs; defaults to `S3_ENDPOINT`), `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY`,
 `S3_SECRET_KEY`, `S3_FORCE_PATH_STYLE`, `SMTP_URL`, `MAIL_FROM`, `SESSION_SECRET`, `MEDIA_HMAC_SECRET`,
 `SESSION_TTL_DAYS`, `MAGIC_LINK_TTL_MINUTES`, `INVITE_LINK_TTL_DAYS`, `MEDIA_TOKEN_TTL_SECONDS`,
 `UPLOAD_URL_TTL_SECONDS`, `AUTH_RATE_LIMIT_MAX`, `AUTH_EMAIL_RATE_LIMIT_MAX`, `IP_RATE_LIMIT_MAX`,
-`SESSION_RATE_LIMIT_MAX`, `MEDIA_RATE_LIMIT_MAX`. In production the process refuses to start with the
+`SESSION_RATE_LIMIT_MAX`, `MEDIA_RATE_LIMIT_MAX`, `WRITE_RATE_LIMIT_MAX`, `COMMENT_RATE_LIMIT_MAX`,
+`SEARCH_RATE_LIMIT_MAX`, `SHARE_RATE_LIMIT_MAX`. In production the process refuses to start with the
 compose development defaults for `SESSION_SECRET`, `MEDIA_HMAC_SECRET` or `S3_SECRET_KEY`, with equal
 session and media secrets, or with a non-https `APP_BASE_URL`.
 
@@ -149,4 +156,69 @@ session and media secrets, or with a non-https `APP_BASE_URL`.
 Errors are `{error: {code, message, requestId}}`; `code` is stable (`unauthenticated`, `csrf`,
 `not_member`, `role_forbidden`, `invalid_credentials`, `invalid_token`, `email_taken`, `slug_taken`,
 `already_member`, `content_not_found`, `no_media`, `retracted`, `stale_version`, `size_mismatch`,
-`upload_failed`, `bad_cursor`, `bad_expiry`, `validation`, the `writeTuple` rule codes, `internal`).
+`upload_failed`, `bad_cursor`, `bad_expiry`, `validation`, the `writeTuple` rule codes, `internal`; M1b adds
+`comments_disabled`, `comment_blocked`, `comment_not_found`, `bad_parent`, `idempotency_mismatch`, `empty_body`,
+`body_too_long`, `moderation_forbidden`, `pin_forbidden`, `not_in_audience`, `not_published`, `self_share`,
+`stream_not_found`).
+
+## M1b: reactions, comments, share, search, engagement, pins and settings
+
+Every M1b reader path keeps `readerVisibleSql` as its only visibility predicate: likes, comments, shares,
+search results, totals and snippets, stats and pins answer 404 `content_not_found` for an item the caller
+cannot see, so invisible and missing items are indistinguishable (ADR-0002 side channels). Lists are
+cursor-paginated with `limit` at most 50; a malformed cursor is 400 `bad_cursor`.
+
+- `POST`/`DELETE /v1/content/:id/like` are idempotent (`reaction` primary key) and answer
+  `{liked, likeCount}` after the call. Likes also appear on feed items and the content detail.
+- Comments (`GET`/`POST /v1/content/:id/comments`, `POST /v1/comments/:id/report`,
+  `POST /v1/comments/:id/remove`): one nesting level (a reply to a reply attaches to the root); the
+  body is NFC-normalised, stripped of control/bidi/zero-width characters and capped at 2000 UTF-16 units
+  (400 `empty_body` / `body_too_long`); `clientKey` makes creation idempotent per (author, item) and a
+  replay with a different body or parent is 409 `idempotency_mismatch`; the org (`commentsEnabled`) or
+  any audience stream (`PATCH /v1/streams/:id {commentsEnabled}`) can switch comments off (409
+  `comments_disabled`, existing threads stay readable). Reports are one per reporter; `reportCount`
+  shows to moderators only. Removal is allowed to the comment author and to moderators (org owner/admin,
+  or moderator/owner of a stream the item is addressed to; the content owner has no moderation right by
+  ownership, 403 `moderation_forbidden`); every removal writes `audit_event comment.removed` and leaves a
+  tombstone (`state: removed`, no body, no author). The org comment scanner (ADR-0009 §5,
+  `commentScanPolicy` off|warn|block) names finding categories only. `comment.created` goes to the
+  outbox; the worker notifies the content owner (`commented`) and the root author (`replied`).
+- `POST /v1/content/:id/share {userId}` never widens access (ADR-0002): the recipient gets a
+  `content.shared` notification only if they already pass `readerVisible`; the response `{delivered,
+linkPath}` is identical for unknown, deactivated and no-access recipients, every attempt is an
+  `audit_event content.shared`, and the route has its own budget (`SHARE_RATE_LIMIT_MAX`). Retracted or
+  expired items cannot be shared (404). The sharer may not share with themselves (400 `self_share`).
+- `GET /v1/search?q=&limit=&cursor=&streamId=&tag=` (ADR-0013): `websearch_to_tsquery('simple', q)`
+  over `content.search_tsv` (title, description) and the current version's transcript windows in
+  `chunk`; `total` counts the same filtered set (capped at 1000); `streamId` and `tag` only narrow.
+  Snippets are plain text with `ranges` (UTF-16 code-unit `[start, end)` pairs) and, for transcript hits,
+  `tMs` (the window start) so clients open the player there; each hit carries the same `media` object as
+  a feed item. The keyset cursor is (score to 6 decimals, publishAt, id). A query without lexemes
+  answers an empty page. The request log never contains `q` (the `req` serializer rewrites it).
+- `POST /v1/content/:id/engagement {versionId, sessionKey, type, positionMs?}` records `view_start`,
+  `progress_25|50|75` and `complete` idempotently per (user, item, version, type, session) through
+  `record_engagement`; a stale version is 409 `stale_version`; `recorded: false` on replay or once a user
+  used more than 50 session keys for one item in 24 h. A `view_start` after completion (or 75 %) from a
+  new session is also counted as `rewatch`; `user_content_state` (progress, watch count, last version,
+  title snapshot) is kept current so retraction notices keep targeting viewers (ADR-0005).
+  `POST /v1/content/:id/view` (M1a) is unchanged.
+- `GET /v1/content/:id/stats` is author-only (`authorAccessible`, 404 otherwise) and reports counts
+  computed live from `engagement_event`, `reaction` and visible comments. `viewers` (named rows) is
+  present only when the org privacy mode is `named`; the stored default `identified_for_required_only`
+  (decision Q1) behaves like `aggregate_only` until required content exists (M4).
+- `GET`/`PATCH /v1/org/settings` (`privacyMode`, `commentsEnabled`, `engagementRetentionDays`,
+  `commentScanPolicy`; PATCH is owner/admin, merged key by key so other `org.settings` keys survive,
+  audited). `GET`/`PATCH /v1/me/preferences {emailDigest: daily|off}` per member.
+- `PUT /v1/content/:id/tags {tags}`: closed `EventTag` enum (`onboarding`, `announcement`,
+  `current-events`, `training`), at most four, unique; editable by owner/admin/announcer authors
+  (`authorAccessible` plus role); the database re-checks the enum (`event_tags_valid`).
+- Pins: `POST /v1/content/:id/pin {streamId|null}` and `DELETE /v1/content/:id/pin?streamId=`. Org-wide
+  pins need owner/admin/announcer; stream pins also accept that stream's moderator/owner, and the item
+  must be addressed to the stream (409 `not_in_audience`); only live published items can be pinned
+  (409 `not_published`); pins bump `content_epoch` and are audited. `pinned` on feed and detail is per
+  viewer (org pins, or stream pins in streams the viewer can access and the item is still addressed to).
+- `GET /v1/feed` accepts `tag=` and `pinned=true` as additional filters; items carry `tags`, `pinned`,
+  `likeCount`, `liked`, `commentCount` (visible comments only). `GET /v1/content/:id` carries the same plus
+  `commentsEnabled`. `GET /v1/streams` items and `PATCH /v1/streams/:id` carry `commentsEnabled`.
+- `GET /v1/me` carries `hasPassword`; `POST /v1/auth/password` answers 409 `password_set` before
+  hashing when a password exists.

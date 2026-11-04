@@ -29,6 +29,7 @@ interface Script {
   failNotifyFor?: string;
   /** value returned by the attempts UPDATE after a failure (default 1) */
   attemptsAfter?: number;
+  commentBrief?: Row | null;
 }
 
 /** Minimal pg stand-in that answers the worker's SQL by function name and records every call. */
@@ -43,6 +44,8 @@ function fakeDb(script: Script) {
       if (sql.includes('platform_viewers_of_version')) return script.viewers ?? [];
       if (sql.includes('platform_org_notify_settings'))
         return [{ include_title_after_access_loss: script.notifySetting ?? false }];
+      if (sql.includes('platform_comment_brief'))
+        return script.commentBrief ? [script.commentBrief] : [];
       if (sql.includes('platform_notify')) {
         if (script.failNotifyFor && params[1] === script.failNotifyFor) throw new Error('db down');
         return [{ inserted: true }];
@@ -79,6 +82,8 @@ function ctxWith(
     store: {} as JobContext['store'],
     asr: {} as JobContext['asr'],
     limits: {} as JobContext['limits'],
+    mailer: { send: async () => undefined },
+    appBaseUrl: 'http://localhost:3000',
     log: {
       info: () => undefined,
       warn: () => undefined,
@@ -269,7 +274,7 @@ describe('dispatchEvent', () => {
   it('unknown event types are acknowledged without side effects', async () => {
     const db = fakeDb({});
     const ctx = ctxWith(db.pool);
-    expect(await dispatchEvent(db.pool, ctx, ev('comment.created'))).toMatch(/ignored/);
+    expect(await dispatchEvent(db.pool, ctx, ev('content.unknown'))).toMatch(/ignored/);
     expect(ctx.sent).toEqual([]);
     expect(db.calls).toEqual([]);
   });
@@ -359,5 +364,54 @@ describe('contentTransition', () => {
       contentTransition({ ...base, kind: 'delete' }, ctxWith(db.pool)),
     ).rejects.toThrow();
     await expect(contentTransition({ orgId: 'nope' }, ctxWith(db.pool))).rejects.toThrow();
+  });
+});
+
+describe('fanOutComment', () => {
+  const brief = {
+    content_id: CONTENT,
+    author_id: U1,
+    content_owner_id: U2,
+    root_author_id: null,
+    state: 'visible',
+  };
+  it('notifies the owner and the root author, never the commenter, with one dedupe key per comment', async () => {
+    const db = fakeDb({
+      commentBrief: { ...brief, root_author_id: '66666666-6666-4666-8666-666666666666' },
+    });
+    const ctx = ctxWith(db.pool);
+    const out = await dispatchEvent(
+      db.pool,
+      ctx,
+      ev('comment.created', { version_id: null, payload: { commentId: 'c1' } }),
+    );
+    expect(out).toBe('comment fan-out: 2/2');
+    const notifies = db.calls.filter((c) => c.sql.includes('platform_notify'));
+    expect(notifies.map((c) => [c.params[1], c.params[3], c.params[7]])).toEqual([
+      [U2, 'commented', 'comment:c1'],
+      ['66666666-6666-4666-8666-666666666666', 'replied', 'comment:c1'],
+    ]);
+  });
+  it('skips the owner when they commented themselves and removed comments entirely', async () => {
+    const own = fakeDb({ commentBrief: { ...brief, author_id: U2 } });
+    expect(
+      await dispatchEvent(
+        own.pool,
+        ctxWith(own.pool),
+        ev('comment.created', { payload: { commentId: 'c2' } }),
+      ),
+    ).toBe('comment fan-out: 0/0');
+    const removed = fakeDb({ commentBrief: { ...brief, state: 'removed' } });
+    expect(
+      await dispatchEvent(
+        removed.pool,
+        ctxWith(removed.pool),
+        ev('comment.created', { payload: { commentId: 'c3' } }),
+      ),
+    ).toBe('comment fan-out: 0/0');
+    const noId = fakeDb({ commentBrief: brief });
+    expect(await dispatchEvent(noId.pool, ctxWith(noId.pool), ev('comment.created'))).toBe(
+      'comment fan-out: 0/0',
+    );
   });
 });
