@@ -92,6 +92,8 @@ docker compose -f infra/docker/docker-compose.yml up --build
 
 The transcript index itself is built by a database trigger in the transaction that makes a version current (migration 0009), not by a job.
 
+The worker exposes `GET /health` on `HOST` (default `127.0.0.1`) port `WORKER_HEALTH_PORT` (default 4001): 200 `{status: ok, bossStarted, lastDrainAt, lastDrainOk, uptimeSeconds}` while pg-boss is up and an outbox drain completed within three drain intervals (one minute of start-up grace), otherwise 503 `degraded`. Helm and compose probe this port; it serves nothing else.
+
 ### ASR providers (ADR-0008)
 
 `ASR_PROVIDER=fake` (default) produces deterministic placeholder segments and needs no model. `ASR_PROVIDER=whisper-http` sends a 16 kHz mono WAV to a self-hosted whisper.cpp server (`WHISPER_URL`, default `http://whisper:8080`; `WHISPER_TIMEOUT_MS`). The deployment policy is self-host-only and ZDR by default (`PROVIDER_SELF_HOST_ONLY`, `PROVIDER_REQUIRE_ZDR`); a provider outside the policy makes the worker refuse to start rather than fall back.
@@ -117,7 +119,9 @@ tenant tables that enforce `FORCE ROW LEVEL SECURITY`, so an owner without bypas
 sign-in, invites and fan-out would silently return nothing. The schema lint fails when a tenant table is
 owned by a role without bypass. Object storage must answer CORS preflights from the web origin for direct
 multipart uploads; the API applies a bucket CORS rule at startup for `APP_BASE_URL` (override with
-`S3_CORS_ORIGINS`). Emailed magic links and invites point at `APP_BASE_URL/magic?token=...`.
+`S3_CORS_ORIGINS`). Presigned upload-part URLs are signed against `S3_PUBLIC_ENDPOINT` when set (the
+browser-reachable address, for example the edge proxy's storage route; compose's internal `http://storage:8333`
+is not resolvable by a browser), otherwise against `S3_ENDPOINT`. Emailed magic links and invites point at `APP_BASE_URL/magic?token=...`.
 
 ## Proxies and rate limits
 

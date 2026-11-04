@@ -25,6 +25,10 @@ const Env = z.object({
 
   // Object storage (S3 API; SeaweedFS in compose). Path-style addressing is the self-host default.
   S3_ENDPOINT: z.url().default('http://localhost:8333'),
+  // Browser-reachable storage endpoint used only to presign upload-part URLs (compose's internal
+  // http://storage:8333 cannot be resolved by a browser); defaults to S3_ENDPOINT. The infra owner routes
+  // it through the edge proxy; the bucket CORS allow-list is unaffected (it lists browser origins).
+  S3_PUBLIC_ENDPOINT: z.url().optional(),
   S3_REGION: z.string().min(1).default('us-east-1'),
   S3_BUCKET: z.string().min(1).default('ourstream'),
   S3_ACCESS_KEY: z.string().min(1).default('ourstream-dev'),

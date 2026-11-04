@@ -100,6 +100,15 @@ export function createS3Store(config: Config): ObjectStore {
     credentials: { accessKeyId: config.S3_ACCESS_KEY, secretAccessKey: config.S3_SECRET_KEY },
   });
   const Bucket = config.S3_BUCKET;
+  // Presigned part URLs are what the browser calls, so they are signed against the public endpoint.
+  const presignClient = config.S3_PUBLIC_ENDPOINT
+    ? new S3Client({
+        endpoint: config.S3_PUBLIC_ENDPOINT,
+        region: config.S3_REGION,
+        forcePathStyle: config.S3_FORCE_PATH_STYLE,
+        credentials: { accessKeyId: config.S3_ACCESS_KEY, secretAccessKey: config.S3_SECRET_KEY },
+      })
+    : client;
   return {
     async ensureBucket() {
       try {
@@ -133,9 +142,11 @@ export function createS3Store(config: Config): ObjectStore {
       return r.UploadId;
     },
     presignUploadPart(Key, UploadId, PartNumber, expiresIn) {
-      return getSignedUrl(client, new UploadPartCommand({ Bucket, Key, UploadId, PartNumber }), {
-        expiresIn,
-      });
+      return getSignedUrl(
+        presignClient,
+        new UploadPartCommand({ Bucket, Key, UploadId, PartNumber }),
+        { expiresIn },
+      );
     },
     async completeMultipartUpload(Key, UploadId, parts) {
       await client.send(

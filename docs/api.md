@@ -136,7 +136,8 @@ Worker contract: asset values in `content_version.assets` (`hls.master`, `poster
 
 ## Configuration (`apps/api/src/config.ts`)
 
-`DATABASE_URL`, `APP_BASE_URL`, `TRUST_PROXY`, `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY`,
+`DATABASE_URL`, `APP_BASE_URL`, `TRUST_PROXY`, `S3_ENDPOINT`, `S3_PUBLIC_ENDPOINT` (browser-reachable
+endpoint used only to presign upload-part URLs; defaults to `S3_ENDPOINT`), `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY`,
 `S3_SECRET_KEY`, `S3_FORCE_PATH_STYLE`, `SMTP_URL`, `MAIL_FROM`, `SESSION_SECRET`, `MEDIA_HMAC_SECRET`,
 `SESSION_TTL_DAYS`, `MAGIC_LINK_TTL_MINUTES`, `INVITE_LINK_TTL_DAYS`, `MEDIA_TOKEN_TTL_SECONDS`,
 `UPLOAD_URL_TTL_SECONDS`, `AUTH_RATE_LIMIT_MAX`, `AUTH_EMAIL_RATE_LIMIT_MAX`, `IP_RATE_LIMIT_MAX`,

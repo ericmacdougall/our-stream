@@ -7,6 +7,7 @@ import { createSmtpMailer, LoggingMailer } from '@our-stream/notifications';
 import { createObjectStore, limitsFromEnv, s3ConfigFromEnv } from '@our-stream/pipeline';
 import { createAsrProviderFromEnv, selectProvider } from '@our-stream/providers';
 import { handlers, QUEUES, type JobContext } from './jobs.js';
+import { startHealthServer, type WorkerHealthState } from './health.js';
 import { drainOnce } from './outbox.js';
 
 const log = pino({
@@ -39,9 +40,25 @@ const bossSchema = 'pgboss';
   await bootstrapPool.end();
   log.info({ outcome }, 'pg-boss schema bootstrap');
 }
+const drainIntervalMs = Number(process.env['OUTBOX_DRAIN_INTERVAL_MS'] ?? '5000');
+// Readiness for probes (Helm/compose): loopback by default, HOST honoured like the API.
+const health: WorkerHealthState = {
+  startedAt: new Date(),
+  bossStarted: false,
+  lastDrainAt: null,
+  lastDrainOk: null,
+  drainIntervalMs,
+};
+const healthServer = startHealthServer(health, {
+  host: process.env['HOST'] ?? '127.0.0.1',
+  port: Number(process.env['WORKER_HEALTH_PORT'] ?? '4001'),
+  now: () => new Date(),
+});
+
 const boss = new PgBoss({ connectionString: platformUrl, schema: bossSchema, migrate: false });
 boss.on('error', (err: Error) => log.error({ err }, 'pg-boss error'));
 await boss.start();
+health.bossStarted = true;
 
 // Email channel (ADR-0005): SMTP when configured, otherwise digests are logged as skipped.
 const smtpUrl = process.env['SMTP_URL'];
@@ -134,13 +151,20 @@ await boss.schedule(
   { singletonKey: 'search-prune' },
 );
 
-const drainIntervalMs = Number(process.env['OUTBOX_DRAIN_INTERVAL_MS'] ?? '5000');
 let draining = false;
 const drainTimer = setInterval(() => {
   if (draining) return;
   draining = true;
   drainOnce(ctx)
-    .catch((err: Error) => log.error({ err }, 'outbox drain failed'))
+    .then(() => {
+      health.lastDrainAt = new Date();
+      health.lastDrainOk = true;
+    })
+    .catch((err: Error) => {
+      health.lastDrainAt = new Date();
+      health.lastDrainOk = false;
+      log.error({ err }, 'outbox drain failed');
+    })
     .finally(() => {
       draining = false;
     });
@@ -153,6 +177,7 @@ log.info(
     mailer: smtpUrl ? 'smtp' : 'logging',
     policy,
     drainIntervalMs,
+    healthPort: Number(process.env['WORKER_HEALTH_PORT'] ?? '4001'),
     limits: { threads: limits.threads, maxInputBytes: limits.maxInputBytes },
   },
   'worker started',
@@ -163,6 +188,7 @@ const shutdown = async () => {
   if (stopping) return;
   stopping = true;
   clearInterval(drainTimer);
+  healthServer.close();
   await boss.stop({ graceful: true, timeout: 30_000 });
   await ctx.tenantPool.end();
   await ctx.platformPool.end();
