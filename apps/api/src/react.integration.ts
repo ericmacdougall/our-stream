@@ -87,7 +87,11 @@ describe.skipIf(!integrationReady)('reactions, comments, share (integration)', (
     expect((await h.call('GET', `/v1/content/${contentId}`, viewer)).body).toMatchObject({
       liked: true,
       likeCount: 2,
+      media: { hls: `/media/${contentId}/${versionId}/hls/master.m3u8` },
     });
+    // A draft has no playable media on its detail, even for its author.
+    const draft = await h.call('POST', '/v1/content', author, { kind: 'clip', title: 'Draft' });
+    expect((draft.body as { media: unknown }).media).toBeNull();
     const un = await h.call('DELETE', `/v1/content/${contentId}/like`, viewer2);
     expect(un.body).toEqual({ liked: false, likeCount: 1 });
     expect((await h.call('DELETE', `/v1/content/${contentId}/like`, viewer2)).body).toEqual({

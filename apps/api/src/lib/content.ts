@@ -6,6 +6,7 @@ import type { TenantClient } from '@our-stream/db';
 import type { z } from 'zod';
 import type { AudienceTarget, ContentDetailM1b } from '@our-stream/contracts';
 import { notFound } from './errors.js';
+import { feedMedia } from './media.js';
 import {
   commentCountSql,
   commentsEnabledSql,
@@ -169,6 +170,11 @@ export async function loadContent(client: TenantClient, contentId: string): Prom
     liked: row.liked,
     commentCount: row.comment_count,
     commentsEnabled: row.comments_enabled,
+    // Only the current, processed version is playable; same builder as the feed (relative proxy paths).
+    media:
+      row.v_id !== null && row.v_id === row.current_version_id && row.v_status === 'current'
+        ? feedMedia(orgId, row.id, row.v_id, row.assets)
+        : null,
   };
   return {
     detail,
