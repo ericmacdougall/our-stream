@@ -72,21 +72,13 @@ test('sign-in, upload and feed have no serious accessibility violations', async 
   await page.goto('/notifications');
   await expectNoSeriousViolations(page, 'notifications');
 
-  // Account page: the form, then the settled outcome (this owner already has a password).
+  // Account page (digest preference; the set-password form is hidden for a password account).
   await page.goto('/account');
+  await expect(page.getByTestId('preferences')).toBeVisible();
   await page.screenshot({ path: test.info().outputPath('account.png'), fullPage: true });
   await expectNoSeriousViolations(page, 'account');
-  // Keyboard order: heading -> new password -> show toggle -> confirm -> submit.
-  await page.getByLabel('New password', { exact: true }).focus();
-  await page.keyboard.press('Tab');
-  await expect(page.getByLabel('Show password')).toBeFocused();
-  await page.keyboard.press('Tab');
-  await expect(page.getByLabel('Confirm new password')).toBeFocused();
-  await page.keyboard.press('Tab');
-  await expect(page.getByRole('button', { name: 'Set password' })).toBeFocused();
-  await page.getByLabel('New password', { exact: true }).fill(account.password);
-  await page.getByLabel('Confirm new password').fill(account.password);
-  await page.getByRole('button', { name: 'Set password' }).click();
-  await expect(page.getByTestId('password-outcome')).toHaveAttribute('data-outcome', 'alreadySet');
-  await expectNoSeriousViolations(page, 'account-settled');
+  // Organisation settings (the owner) and a stream page with the comments switch.
+  await page.goto('/org/settings');
+  await expect(page.getByTestId('org-save')).toBeVisible();
+  await expectNoSeriousViolations(page, 'org-settings');
 });

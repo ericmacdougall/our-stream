@@ -9,16 +9,23 @@ export default async function StreamPage({ params }: { params: Promise<{ id: str
   const { id } = await params;
   await requireMe(`/streams/${id}`);
   const api = await serverApi();
-  const [stream, members, orgMembers] = await Promise.all([
+  const [stream, members, orgMembers, list] = await Promise.all([
     api.GET('/v1/streams/{id}', { params: { path: { id } } }),
     api.GET('/v1/streams/{id}/members', { params: { path: { id } } }),
     api.GET('/v1/members'),
+    api.GET('/v1/streams'),
   ]);
-  if (!stream.data) notFound();
+  // The contract has GET /v1/streams/{id}; the API currently serves only the list (reported), so a
+  // missing detail answer falls back to the list entry with the same id. Anything else is 404.
+  const detail =
+    stream.data ??
+    listItems<NonNullable<typeof stream.data>>(list.data).find((s) => s.id === id) ??
+    null;
+  if (!detail) notFound();
   return (
     <main id="main" className="page">
       <StreamDetail
-        stream={stream.data}
+        stream={detail}
         members={listItems(members.data)}
         orgMembers={listItems(orgMembers.data)}
       />

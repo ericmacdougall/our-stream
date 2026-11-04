@@ -116,7 +116,7 @@ What the chart deploys:
   non-empty). Web is deliberately not allowed to reach the api: its build-time rewrites forward
   `X-Forwarded-For` unchanged, so if a controller ever routed `/api` to web (for example one that treats the
   ingress-nginx regex path literally), the request fails instead of arriving from inside the trusted range
-  with a forged header. The template also refuses a values file with no `/api` route to the api or a web
+  with a forged header. Images behind the edge are built with `WEB_PROXY_API=false` (web.Dockerfile build arg), so they carry no `/api` or `/media` rewrite at all and a misrouted request fails closed at web. The template also refuses a values file with no `/api` route to the api or a web
   path under `/api` or `/media`. Egress is not restricted.
 - Optional HPAs for api and web, off by default. Leave the api at one replica until budgets have a shared
   store.

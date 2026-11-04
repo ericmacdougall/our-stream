@@ -216,15 +216,18 @@ services:
     build:
       context: ../..
       dockerfile: infra/docker/web.Dockerfile
+      args:
+        # The edge routes /api and /media to the api before they reach web, so the production image is
+        # built without the Next.js rewrites: a misrouted request fails closed at web instead of web
+        # becoming an unintended hop to the api. `next dev` keeps its rewrites (WEB_PROXY_API unset).
+        WEB_PROXY_API: 'false'
     environment:
       NODE_ENV: production
       PORT: '3000'
-      # Build-time rewrite target (web.Dockerfile ARG); unused at runtime because the edge routes /api and
-      # /media to the api before they reach web.
+      # Runtime target of the server-side Data Access Layer (apps/web/src/lib/api/server.ts); the
+      # browser never uses it because the edge routes /api and /media.
       API_INTERNAL_URL: http://api:4000
-      NEXT_PUBLIC_API_URL: http://localhost:${API_PORT:-4000}
-    # No host port on purpose: web is only reachable through the edge. Its /api and /media rewrites still
-    # work (used by `next dev`), but the edge routes those paths to the api before they reach web.
+    # No host port on purpose: web is only reachable through the edge.
     networks: [edge]
     read_only: true
     tmpfs: [/tmp, /app/apps/web/.next/cache]

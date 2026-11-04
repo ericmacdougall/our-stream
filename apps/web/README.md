@@ -10,6 +10,13 @@ database: every read and write goes to the API through the typed client in `@our
   `API_INTERNAL_URL` (default `http://localhost:4000`) so the HttpOnly session cookie travels
   same-site and `FeedItem.media` relative paths resolve. Rewrites are fixed at build time; the Docker
   build takes `API_INTERNAL_URL` as a build arg (default `http://api:4000`, matching compose).
+- Behind an edge that already routes `/api` and `/media` to the API (Caddy in compose, the Helm
+  chart's Ingress) the production image is built with `WEB_PROXY_API=false` (web.Dockerfile build
+  arg): `next.config.ts` then emits no rewrite at all, so a misrouted request fails closed at web
+  instead of web becoming an unintended hop. Leave it unset (default `true`) for `next dev` and for
+  images that must work without an edge.
+- `API_INTERNAL_URL` is also read at runtime by the Data Access Layer, so `next start` needs it in
+  the environment even though the browser rewrite target is fixed at build time.
 - Server components use the Data Access Layer in `src/lib/api/server.ts`, which forwards the request
   cookies. `src/proxy.ts` only redirects on cookie presence; the real check is `GET /v1/me`.
 - Mutations send the CSRF token from `GET /v1/me` as `x-csrf-token` (`src/lib/api/client.ts`).
@@ -57,7 +64,8 @@ installed Chrome when the bundled Chromium lacks H.264. Reports land in `playwri
 
 `/` feed (default landing), `/sign-in`, `/sign-up`, `/magic?token=`, `/streams`, `/streams/[id]`,
 `/upload`, `/content/[id]` (`?t=<ms>` seeks the player), `/content/[id]/publish`, `/notifications`,
-`/account`, `/search?q=&streamId=&tag=&play=&t=`; the feed takes `?streamId=&tag=&pinned=true` filters.
+`/account`, `/org/settings` (owners/admins), `/search?q=&streamId=&tag=&play=&t=`; the feed takes
+`?streamId=&tag=&pinned=true` filters.
 
 `/sign-in` and `/sign-up` check the session server-side (`getMe`) and redirect a signed-in visitor to
 `/` or the same-origin `?next` target (`src/lib/auth-redirect.ts`; auth pages and non-page paths such
@@ -112,6 +120,9 @@ mutations carry `x-csrf-token`; auth routes are the only unauthenticated ones.
 | GET         | `/v1/content/{id}/stats`           | – → ContentStats (`viewers` only under privacy mode `named`)   |
 | PUT         | `/v1/content/{id}/tags`            | SetTagsRequest → ContentDetailM1b                              |
 | POST/DELETE | `/v1/content/{id}/pin`             | PinRequest / `?streamId` → ContentDetailM1b                    |
+| GET / PATCH | `/v1/me/preferences`               | – / UpdateMePreferencesRequest → MePreferences                 |
+| GET / PATCH | `/v1/org/settings`                 | – / UpdateOrgSettingsRequest → OrgSettings (PATCH owner/admin) |
+| PATCH       | `/v1/streams/{id}`                 | UpdateStreamRequest → StreamM1b (`commentsEnabled`)            |
 
 Search (`/search?q=&streamId=&tag=`) is a plain GET form, so the query lives in the URL and never in
 a client log; `?play=<id>&t=<ms>` opens a result's inline player at that instant and is a shareable
@@ -131,6 +142,12 @@ targets (org-wide by org role; a stream only when the clip is addressed to it an
 moderates it, `src/lib/m1b/pins.ts`), because the contract exposes one `pinned` aggregate per clip.
 Stats (`/v1/content/{id}/stats`, author only) show counts; the viewer table renders only when the
 server sends `viewers` (org privacy mode `named`); the client never infers names otherwise.
+
+Settings: `/account` holds the email digest preference (daily/off, saved on change) and hides the
+one-time set-password form when `MeM1b.hasPassword` is true (an M1a server has no flag, so the form
+stays); `/org/settings` lets owners/admins set the viewing privacy mode, comments on/off and the
+comment scanner policy (retention is read-only, operator-level); a stream's detail page gives its
+moderators/owners a comments switch. Members get a neutral refusal on `/org/settings`.
 
 M1b routes are called only through `src/lib/m1b/api.ts` (one file to edit on a contract change). The
 feed and detail fields they add (`tags`, `pinned`, `likeCount`, `liked`, `commentCount`) are filled

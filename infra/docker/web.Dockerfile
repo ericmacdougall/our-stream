@@ -19,6 +19,11 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # /api and /media rewrites are fixed at build time (next.config.ts); default matches compose.
 ARG API_INTERNAL_URL=http://api:4000
 ENV API_INTERNAL_URL=${API_INTERNAL_URL}
+# Behind an edge (Caddy in compose, the chart's Ingress) /api and /media never reach web, so the
+# production image carries no rewrite: WEB_PROXY_API=false fails closed on a misrouted request.
+# Keep the default (true) only for images that must be reachable without an edge.
+ARG WEB_PROXY_API=true
+ENV WEB_PROXY_API=${WEB_PROXY_API}
 RUN pnpm --filter @our-stream/contracts build && pnpm --filter @our-stream/web build
 
 FROM node:24-bookworm-slim AS runtime

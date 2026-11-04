@@ -75,6 +75,9 @@ export function NavBar() {
     { href: '/streams', label: t('nav.streams') },
     { href: '/upload', label: t('nav.upload') },
   ];
+  if (me.org?.role === 'owner' || me.org?.role === 'admin') {
+    links.push({ href: '/org/settings', label: t('nav.orgSettings') });
+  }
 
   return (
     <header className="topnav">

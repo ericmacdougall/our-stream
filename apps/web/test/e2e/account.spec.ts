@@ -12,38 +12,17 @@ async function fillPasswordForm(page: Page, password: string) {
   await page.getByLabel('Confirm new password').fill(password);
 }
 
-test('an account that already has a password sees the settled outcome, not a generic error', async ({
-  page,
-}) => {
-  const account = uniqueAccount('pw409');
+test('a password account sees its digest preference and no set-password form', async ({ page }) => {
+  const account = uniqueAccount('pwacct');
   await signUp(page, account);
-
   await page.getByRole('link', { name: `Account: ${account.displayName}` }).click();
   await page.waitForURL((u) => u.pathname === '/account');
   await expect(page.getByRole('heading', { level: 1, name: 'Account' })).toBeVisible();
-
-  // Client-side checks come first: mismatch never reaches the server.
-  const posts: string[] = [];
-  page.on('request', (r) => {
-    if (r.method() === 'POST' && r.url().includes('/v1/auth/password')) posts.push(r.url());
-  });
-  await page.getByLabel('New password', { exact: true }).fill(NEW_PASSWORD);
-  await page.getByLabel('Confirm new password').fill(`${NEW_PASSWORD}x`);
-  await page.getByRole('button', { name: 'Set password' }).click();
-  await expect(page.locator('p[role="alert"]')).toHaveText('The two passwords do not match.');
-  expect(posts).toHaveLength(0);
-
-  await fillPasswordForm(page, NEW_PASSWORD);
-  await page.getByRole('button', { name: 'Set password' }).click();
-  const outcome = page.getByTestId('password-outcome');
-  await expect(outcome).toHaveAttribute('data-outcome', 'alreadySet');
-  await expect(outcome).toContainText('This account already has a password');
+  // MeM1b.hasPassword hides the one-time form for accounts that already have a password.
   await expect(page.getByLabel('New password', { exact: true })).toHaveCount(0);
-  await expect(outcome).toBeFocused();
-  expect(posts).toHaveLength(1);
-  await page.screenshot({ path: test.info().outputPath('account-already-set.png') });
-
-  // The old password still works: nothing was changed by the refused request.
+  await expect(page.getByTestId('preferences')).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath('account-password-account.png') });
+  // The password keeps working.
   await page.getByRole('button', { name: 'Sign out' }).click();
   await page.waitForURL((u) => u.pathname === '/sign-in');
   await signIn(page, account);
@@ -122,12 +101,10 @@ test('an invitee sets a password once: lost response, retry, double-click, then 
   expect(posts).toHaveLength(2); // the dropped one and exactly one retry
   await page.screenshot({ path: test.info().outputPath('account-set.png') });
 
-  // The password now works, and a second attempt is refused as already set.
+  // The password now works; the form is gone because the account has one.
   await page.getByRole('button', { name: 'Sign out' }).click();
   await page.waitForURL((u) => u.pathname === '/sign-in');
   await signIn(page, { ...owner, email: inviteeEmail, password: NEW_PASSWORD });
   await page.goto('/account');
-  await fillPasswordForm(page, 'another perfectly long password');
-  await page.getByRole('button', { name: 'Set password' }).click();
-  await expect(page.getByTestId('password-outcome')).toHaveAttribute('data-outcome', 'alreadySet');
+  await expect(page.getByLabel('New password', { exact: true })).toHaveCount(0);
 });

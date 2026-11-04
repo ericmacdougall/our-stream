@@ -45,7 +45,10 @@ pnpm --filter @our-stream/api test:integration
 
 The web app only ever calls the API (ADR-0011): the browser hits same-origin `/api/*` and `/media/*`,
 which `next.config.ts` rewrites to `API_INTERNAL_URL` (fixed at build time; the Docker build takes it
-as a build arg). See `apps/web/README.md` for the full map.
+as a build arg). Images that sit behind an edge which already routes `/api` and `/media` (compose's
+Caddy, the chart's Ingress) are built with `WEB_PROXY_API=false` and carry no rewrite, so a misrouted
+request fails closed at web; `API_INTERNAL_URL` is still read at runtime by the server-side Data
+Access Layer. See `apps/web/README.md` for the full map.
 
 ```sh
 pnpm --filter @our-stream/contracts build

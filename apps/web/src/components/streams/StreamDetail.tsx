@@ -6,6 +6,7 @@ import type { MemberSummary, Stream, StreamMember, StreamRole } from '@our-strea
 import { browserApi } from '@/lib/api/client';
 import { listItems } from '@/lib/api/lists';
 import { errorMessage } from '@/lib/errors';
+import { updateStreamComments } from '@/lib/m1b/api';
 import { t, type MessageId } from '@/lib/i18n';
 import { Notice } from '../Notice';
 import { KIND_LABEL } from './StreamsPanel';
@@ -36,6 +37,29 @@ export function StreamDetail({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const canGrant = stream.myRole === 'owner' || stream.myRole === 'moderator';
+  // M1b (StreamM1b.commentsEnabled): absent on an M1a server, then treated as allowed.
+  const initialComments = (stream as { commentsEnabled?: boolean }).commentsEnabled ?? true;
+  const [commentsEnabled, setCommentsEnabled] = useState(initialComments);
+  const [commentsPending, setCommentsPending] = useState(false);
+  const [commentsStatus, setCommentsStatus] = useState<string | null>(null);
+
+  async function toggleComments(next: boolean) {
+    if (commentsPending || next === commentsEnabled) return;
+    const previous = commentsEnabled;
+    setCommentsPending(true);
+    setCommentsEnabled(next);
+    setCommentsStatus(null);
+    setError(null);
+    const result = await updateStreamComments(stream.id, next);
+    if (!result.ok) {
+      setCommentsEnabled(previous);
+      setError(result.message);
+    } else {
+      setCommentsEnabled(result.data.commentsEnabled);
+      setCommentsStatus(t('streams.commentsSaved'));
+    }
+    setCommentsPending(false);
+  }
 
   async function reloadMembers() {
     const { data } = await browserApi().GET('/v1/streams/{id}/members', {
@@ -82,6 +106,26 @@ export function StreamDetail({
           {stream.myRole ? ` · ${t('streams.myRole', { role: stream.myRole })}` : ''}
         </p>
       </header>
+      {canGrant ? (
+        <section
+          className="card"
+          aria-labelledby="stream-comments-heading"
+          data-testid="stream-comments"
+        >
+          <h2 id="stream-comments-heading">{t('streams.comments')}</h2>
+          <label className="inline">
+            <input
+              type="checkbox"
+              checked={commentsEnabled}
+              disabled={commentsPending}
+              onChange={(e) => void toggleComments(e.target.checked)}
+              data-testid="stream-comments-toggle"
+            />{' '}
+            {commentsEnabled ? t('streams.commentsOn') : t('streams.commentsOff')}
+          </label>
+          <Notice kind="success">{commentsStatus}</Notice>
+        </section>
+      ) : null}
       <section aria-labelledby="members-heading" className="card">
         <h2 id="members-heading">{t('streams.membersHeading')}</h2>
         {members.length === 0 ? (
