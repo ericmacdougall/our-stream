@@ -78,6 +78,28 @@ describe.skipIf(!integrationReady)('content, publish rules and feed (integration
     const unknown = await h.call('GET', `/v1/streams/${randomUUID()}`, owner);
     expect(unknown.status).toBe(404);
     expect(errorCode(unknown.body)).toBe('stream_not_found');
+    // A stream id from another org is indistinguishable from an unknown id (RLS + org filter).
+    const otherOwner = await h.signup('other-owner', 'globex');
+    const foreign = (
+      (await h.call('GET', '/v1/streams', otherOwner)).body as { items: Array<{ id: string }> }
+    ).items[0]!.id;
+    const crossOrg = await h.call('GET', `/v1/streams/${foreign}`, owner);
+    expect(crossOrg.status).toBe(404);
+    expect(errorCode(crossOrg.body)).toBe('stream_not_found');
+    // A deactivated member gets exactly the answer the list gives (the membership trigger revokes the
+    // session, so both are 401; a surviving session would be 403 not_member on both).
+    const gone = await h.invite(owner, 'gone', 'member');
+    await h.admin.query(`SELECT set_config('app.org_id', $1, false)`, [owner.orgId]);
+    await h.admin.query(
+      `UPDATE org_membership SET status = 'deactivated' WHERE org_id = $1 AND user_id = $2`,
+      [owner.orgId, gone.userId],
+    );
+    await h.admin.query(`SELECT set_config('app.org_id', '', false)`);
+    const listAnswer = await h.call('GET', '/v1/streams', gone);
+    const detailAnswer = await h.call('GET', `/v1/streams/${dept}`, gone);
+    expect([401, 403]).toContain(listAnswer.status);
+    expect(detailAnswer.status).toBe(listAnswer.status);
+    expect(errorCode(detailAnswer.body)).toBe(errorCode(listAnswer.body));
   });
 
   it('GET /v1/streams/:id/members lists effective members with roles; private streams are hidden from non-members (GoodQA #35633)', async () => {
