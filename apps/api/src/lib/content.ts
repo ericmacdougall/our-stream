@@ -4,10 +4,17 @@
 import { authorAccessibleSql, readerVisibleSql } from '@our-stream/authz';
 import type { TenantClient } from '@our-stream/db';
 import type { z } from 'zod';
-import type { AudienceTarget, ContentDetail } from '@our-stream/contracts';
+import type { AudienceTarget, ContentDetailM1b } from '@our-stream/contracts';
 import { notFound } from './errors.js';
+import {
+  commentCountSql,
+  commentsEnabledSql,
+  likeCountSql,
+  likedSql,
+  pinnedSql,
+} from './m1b-sql.js';
 
-type Detail = z.infer<typeof ContentDetail>;
+type Detail = z.infer<typeof ContentDetailM1b>;
 type Target = z.infer<typeof AudienceTarget>;
 
 interface Row {
@@ -37,6 +44,12 @@ interface Row {
   assets: unknown;
   can_edit: boolean;
   visible: boolean;
+  tags: Detail['tags'];
+  pinned: boolean;
+  like_count: number;
+  liked: boolean;
+  comment_count: number;
+  comments_enabled: boolean;
 }
 
 interface DbChapter {
@@ -97,7 +110,9 @@ export async function loadContent(client: TenantClient, contentId: string): Prom
             a.display_name AS owner_name,
             v.id AS v_id, v.status AS v_status, v.processing_step, v.processing_error, v.duration_ms, v.width, v.height, v.assets,
             ${authorAccessibleSql({ org: '$1', user: '$2' })} AS can_edit,
-            ${readerVisibleSql({ org: '$1', user: '$2' })} AS visible
+            ${readerVisibleSql({ org: '$1', user: '$2' })} AS visible,
+            c.event_tags AS tags, ${pinnedSql('c', '$2')} AS pinned, ${likeCountSql('c')} AS like_count,
+            ${likedSql('c', '$2')} AS liked, ${commentCountSql('c')} AS comment_count, ${commentsEnabledSql('c')} AS comments_enabled
      FROM content c
      LEFT JOIN LATERAL platform_account_get(c.owner_id) a ON true
      LEFT JOIN LATERAL (
@@ -148,6 +163,12 @@ export async function loadContent(client: TenantClient, contentId: string): Prom
     audience,
     canEdit: row.can_edit,
     contentEpoch: Number(row.content_epoch),
+    tags: row.tags,
+    pinned: row.pinned,
+    likeCount: row.like_count,
+    liked: row.liked,
+    commentCount: row.comment_count,
+    commentsEnabled: row.comments_enabled,
   };
   return {
     detail,

@@ -58,6 +58,13 @@ const Env = z.object({
   IP_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(600),
   SESSION_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(600),
   MEDIA_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(1200),
+  // M1b write budgets (per minute, by validated session id): likes/engagement/pins/tags/settings share
+  // WRITE; comments, search and share have their own so a flood on one cannot starve the others and the
+  // share oracle (ADR-0002 accepts telling the sharer) stays slow and audited.
+  WRITE_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(60),
+  COMMENT_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(10),
+  SEARCH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(60),
+  SHARE_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(20),
 });
 
 export type Config = z.infer<typeof Env>;

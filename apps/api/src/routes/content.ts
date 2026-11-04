@@ -9,7 +9,7 @@ import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { deleteTuple, readerVisibleSql, writeTuple, type Tuple } from '@our-stream/authz';
 import {
-  ContentDetail,
+  ContentDetailM1b,
   CreateContentRequest,
   MediaTokenResponse,
   Ok,
@@ -103,7 +103,7 @@ export function registerContentRoutes(fastify: FastifyInstance, ctx: AppContext)
       schema: {
         tags: ['content'],
         body: CreateContentRequest,
-        response: { 200: ContentDetail },
+        response: { 200: ContentDetailM1b },
         security,
       },
     },
@@ -132,7 +132,9 @@ export function registerContentRoutes(fastify: FastifyInstance, ctx: AppContext)
 
   app.get(
     '/v1/content/:id',
-    { schema: { tags: ['content'], params: Params, response: { 200: ContentDetail }, security } },
+    {
+      schema: { tags: ['content'], params: Params, response: { 200: ContentDetailM1b }, security },
+    },
     async (req) => {
       const auth = requireMember(req);
       return withTenant(ctx.pool, { orgId: auth.orgId, userId: auth.userId }, async (client) => {
@@ -160,7 +162,7 @@ export function registerContentRoutes(fastify: FastifyInstance, ctx: AppContext)
         tags: ['content'],
         params: Params,
         body: UpdateContentRequest,
-        response: { 200: ContentDetail },
+        response: { 200: ContentDetailM1b },
         security,
       },
     },
@@ -259,7 +261,7 @@ export function registerContentRoutes(fastify: FastifyInstance, ctx: AppContext)
         tags: ['content'],
         params: Params,
         body: UploadCompleteRequest,
-        response: { 200: ContentDetail },
+        response: { 200: ContentDetailM1b },
         security,
       },
     },
@@ -314,7 +316,7 @@ export function registerContentRoutes(fastify: FastifyInstance, ctx: AppContext)
         tags: ['content'],
         params: Params,
         body: PublishRequest,
-        response: { 200: ContentDetail },
+        response: { 200: ContentDetailM1b },
         security,
       },
     },
@@ -395,7 +397,9 @@ export function registerContentRoutes(fastify: FastifyInstance, ctx: AppContext)
 
   app.post(
     '/v1/content/:id/retract',
-    { schema: { tags: ['content'], params: Params, response: { 200: ContentDetail }, security } },
+    {
+      schema: { tags: ['content'], params: Params, response: { 200: ContentDetailM1b }, security },
+    },
     async (req) => {
       const auth = requireMember(req);
       return withTenant(ctx.pool, { orgId: auth.orgId, userId: auth.userId }, async (client) => {
