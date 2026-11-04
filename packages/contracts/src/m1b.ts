@@ -243,6 +243,12 @@ export const ContentDetailM1b = ContentDetail.extend({
   liked: z.boolean(),
   commentCount: Count,
   commentsEnabled: z.boolean(),
+  /**
+   * Same proxy URLs as `FeedItem.media` (never storage URLs), built by the same code path, so
+   * `/content/{id}?t=` can host a player; null until a current processed version with HLS exists.
+   * The media proxy still re-authorises every request (readerVisible, current version, media key).
+   */
+  media: FeedItem.shape.media.nullable(),
 });
 
 // ---- account ----
