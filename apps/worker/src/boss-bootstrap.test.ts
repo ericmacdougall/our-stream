@@ -25,6 +25,7 @@ describe('pg-boss bootstrap', () => {
     expect(split.transactional).toMatch(/^\s*BEGIN;/);
     expect(split.transactional.trimEnd()).toMatch(/COMMIT;$/);
     expect(split.transactional).not.toMatch(/CONCURRENTLY/);
+    expect(split.postCommit.length).toBeGreaterThan(0);
     // pg-boss 12.38 (schema 46) appends four concurrent index builds; any later version must keep
     // every trailing statement whole and in order.
     for (const statement of split.postCommit) {

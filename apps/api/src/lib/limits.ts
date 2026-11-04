@@ -24,6 +24,12 @@ export class FixedWindowLimiter {
     return b.n <= this.opts.max;
   }
 
+  /** True when the key has already used its budget in the current window (no charge). */
+  exhausted(key: string, now = Date.now()): boolean {
+    const b = this.buckets.get(key);
+    return Boolean(b && b.reset > now && b.n >= this.opts.max);
+  }
+
   private prune(now: number): void {
     this.lastPrune = now;
     for (const [k, b] of this.buckets) if (b.reset <= now) this.buckets.delete(k);

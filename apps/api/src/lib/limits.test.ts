@@ -15,6 +15,16 @@ describe('FixedWindowLimiter', () => {
     expect(l.allow('a', 1001)).toBe(true); // window reset
   });
 
+  it('exhausted() reports a spent window without charging it', () => {
+    const l = new FixedWindowLimiter({ max: 2, windowMs: 1000 });
+    expect(l.exhausted('a', 0)).toBe(false);
+    l.allow('a', 0);
+    l.allow('a', 1);
+    expect(l.exhausted('a', 2)).toBe(true);
+    expect(l.exhausted('a', 1001)).toBe(false);
+    expect(l.allow('a', 1001)).toBe(true);
+  });
+
   it('prunes expired buckets so long-running processes do not grow without bound', () => {
     const l = new FixedWindowLimiter({ max: 1, windowMs: 10 });
     for (let i = 0; i < 1000; i += 1) l.allow(`k${i}`, 0);

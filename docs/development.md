@@ -132,5 +132,8 @@ address buys a fresh budget:
 
 Budgets are in-memory per API process; a shared store is scheduled with multi-instance deployments
 (ADR-0004). When `TRUST_PROXY` is `false` behind the web container, the per-address budgets are shared
-by every browser user of that deployment, so raise `AUTH_RATE_LIMIT_MAX` and `IP_RATE_LIMIT_MAX` for
-larger single-host installs rather than enabling `TRUST_PROXY` for a hop that does not append its peer.
+by every browser user of that deployment, and one anonymous client can spend the sign-in budget for
+everyone. For an install with more than a handful of users, put a reverse proxy that appends the peer
+(Caddy, Traefik, nginx) in front of the web container and set `TRUST_PROXY` to its address, instead of
+raising `AUTH_RATE_LIMIT_MAX` and `IP_RATE_LIMIT_MAX` or trusting a hop that does not append its peer.
+The per-email budget protects accounts either way.

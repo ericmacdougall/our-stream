@@ -192,13 +192,19 @@ export function registerAuthRoutes(fastify: FastifyInstance, ctx: AppContext): v
       schema: { tags: ['auth'], body: LoginRequest, response: { 200: AuthResponse } },
     },
     async (req, reply) => {
+      // Login charges the per-email budget only on failure, so a flood of wrong passwords cannot be
+      // used to lock the real owner out while they still know the right one.
       const emailNormalized = normalizeEmail(req.body.email);
-      emailBudget(emailNormalized);
+      if (ctx.limits.email.exhausted(emailNormalized))
+        throw new ApiError(429, 'rate_limited', 'too many attempts for this email address');
       const account = await accountByEmail(ctx.pool, emailNormalized);
       const ok = account?.passwordHash
         ? await argon2.verify(account.passwordHash, req.body.password)
         : (await argon2.verify(await dummyHash, req.body.password), false);
-      if (!ok || !account) throw unauthorized('invalid_credentials', 'invalid email or password');
+      if (!ok || !account) {
+        ctx.limits.email.allow(emailNormalized);
+        throw unauthorized('invalid_credentials', 'invalid email or password');
+      }
       const token = newSessionToken();
       const tokenHash = sha256(token);
       const session = await withPlatform(ctx.pool, (client) =>

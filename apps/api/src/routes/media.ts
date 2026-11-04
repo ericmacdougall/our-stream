@@ -79,6 +79,12 @@ export function registerMediaRoutes(fastify: FastifyInstance, ctx: AppContext): 
         throw unauthorized();
       }
 
+      // With an unverified token every failure has one answer (403 bad_token) and charges the address
+      // budget, so a forged but well-formed token is neither a free DB read nor a 404/403 oracle.
+      const tokenFailure = () => {
+        if (!ctx.limits.ip.allow(req.ip)) return rateLimited();
+        return forbidden('bad_token', 'invalid media token');
+      };
       await withTenant(ctx.pool, { orgId, userId }, async (client) => {
         const r = await client.query<Gate>(
           `SELECT c.retracted_at, c.current_version_id, c.media_key_id, v.status AS v_status,
@@ -89,17 +95,20 @@ export function registerMediaRoutes(fastify: FastifyInstance, ctx: AppContext): 
           [orgId, userId, contentId, versionId],
         );
         const g = r.rows[0];
-        if (!g || g.retracted_at !== null) throw notFound('media_not_found', 'not found');
-        if (g.current_version_id !== versionId || g.v_status !== 'current')
-          throw notFound('media_not_found', 'not found');
         if (token) {
-          if (!mediaTokenValid(ctx.config.MEDIA_HMAC_SECRET, token, versionId, g.media_key_id)) {
-            if (!ctx.limits.ip.allow(req.ip)) throw rateLimited();
-            throw forbidden('bad_token', 'invalid media token');
-          }
+          // Verify before any state-dependent answer: a forged token always gets 403 bad_token, a genuine
+          // token issued earlier keeps the documented 404 once the version is retracted or replaced.
+          if (
+            !g ||
+            !mediaTokenValid(ctx.config.MEDIA_HMAC_SECRET, token, versionId, g.media_key_id)
+          )
+            throw tokenFailure();
           // Verified: budget by the user the token was minted for.
           if (!ctx.limits.media.allow(token.userId)) throw rateLimited();
         }
+        if (!g || g.retracted_at !== null) throw notFound('media_not_found', 'not found');
+        if (g.current_version_id !== versionId || g.v_status !== 'current')
+          throw notFound('media_not_found', 'not found');
         if (!g.visible) throw forbidden('forbidden', 'you cannot view this item');
       });
 

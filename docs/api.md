@@ -121,6 +121,11 @@ An invited user signs in through the emailed link and may then choose a password
    `/media/...`, anything else dropped) and are served `Cache-Control: private, no-store`, as are
    captions; segments and images get `private, max-age=60` (ADR-0003 accepted window).
 
+With a token, verification comes first: a token that does not verify against the current media key
+(forged, expired, another version, or issued before a retraction rotated the key) always answers 403
+`bad_token` and charges the address budget, so an unverified token cannot tell retracted or missing
+content from current content. Session (cookie/bearer) paths keep the 404 answers above.
+
 The media token (`GET /v1/content/:id/media-token`, `MEDIA_TOKEN_TTL_SECONDS` ≤ 15 min) is
 `v1.<userId>.<orgId>.<exp>.<HMAC-SHA256(MEDIA_HMAC_SECRET, userId|orgId|versionId|mediaKeyId|exp)>`; it is
 only a transport for identity, never the authorization decision. When a token is used, rewritten

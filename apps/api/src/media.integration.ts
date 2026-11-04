@@ -4,6 +4,8 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { signMediaToken } from './lib/tokens.js';
+
+const errorCode = (body: unknown) => (body as { error: { code: string } }).error.code;
 import {
   createHarness,
   createPlayableContent,
@@ -194,7 +196,7 @@ describe.skipIf(!integrationReady)('media proxy (integration)', () => {
     expect((await h.call('GET', `${base()}/hls/720p/seg0.m4s?t=${token}`)).status).toBe(403);
   });
 
-  it('after retraction every path answers 404, including a token issued before', async () => {
+  it('after retraction cookie paths answer 404 and a token issued before is refused as unverified (403)', async () => {
     const { token } = (await h.call('GET', `/v1/content/${contentId}/media-token`, viewer))
       .body as {
       token: string;
@@ -202,7 +204,30 @@ describe.skipIf(!integrationReady)('media proxy (integration)', () => {
     expect((await h.call('POST', `/v1/content/${contentId}/retract`, author)).status).toBe(200);
     expect((await h.call('GET', `${base()}/hls/master.m3u8`, viewer)).status).toBe(404);
     expect((await h.call('GET', `${base()}/hls/720p/seg0.m4s`, viewer)).status).toBe(404);
-    expect((await h.call('GET', `${base()}/hls/720p/seg0.m4s?t=${token}`)).status).toBe(404);
+    // Retraction rotates the media key, so the old token no longer verifies; unverified tokens get one
+    // answer (403 bad_token) so they cannot tell retracted from current (F1).
+    const stale = await h.call('GET', `${base()}/hls/720p/seg0.m4s?t=${token}`);
+    expect(stale.status).toBe(403);
+    expect(errorCode(stale.body)).toBe('bad_token');
     expect((await h.call('GET', `/v1/content/${contentId}/media-token`, viewer)).status).toBe(404);
+
+    // Verification note F1: an unverified (forged) token must not learn whether the content exists or
+    // was retracted; every such request answers 403 bad_token, never 404.
+    const forged = signMediaToken('not-the-server-secret-at-all-0123456789', {
+      userId: viewer.userId,
+      orgId: owner.orgId!,
+      versionId,
+      mediaKeyId: randomUUID(), // signed with the wrong secret; the key id does not matter
+      exp: Math.floor(Date.now() / 1000) + 300,
+    });
+    const onRetracted = await h.call('GET', `${base()}/hls/720p/seg0.m4s?t=${forged}`);
+    expect(onRetracted.status).toBe(403);
+    expect(errorCode(onRetracted.body)).toBe('bad_token');
+    const onMissing = await h.call(
+      'GET',
+      `/media/${randomUUID()}/${versionId}/hls/720p/seg0.m4s?t=${forged}`,
+    );
+    expect(onMissing.status).toBe(403);
+    expect(errorCode(onMissing.body)).toBe('bad_token');
   });
 });

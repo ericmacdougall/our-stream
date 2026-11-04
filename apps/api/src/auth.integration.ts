@@ -325,6 +325,14 @@ describe.skipIf(!integrationReady)('auth (integration)', () => {
           payload: { email, password: 'wrong-password-here' },
         });
       expect((await attempt(1, owner.email)).statusCode).toBe(401);
+      // A correct password is not charged: one failure so far, the owner still gets in.
+      const good = await app.inject({
+        method: 'POST',
+        url: '/v1/auth/login',
+        headers: { 'x-forwarded-for': '203.0.113.9' },
+        payload: { email: owner.email, password: 'correct-horse-battery-staple' },
+      });
+      expect(good.statusCode).toBe(200);
       expect((await attempt(2, owner.email)).statusCode).toBe(401);
       expect((await attempt(3, owner.email)).statusCode).toBe(429);
       // Another account's budget is untouched.
@@ -337,7 +345,7 @@ describe.skipIf(!integrationReady)('auth (integration)', () => {
   it('the application role cannot list memberships by arbitrary user id; only a live session token reads them (N7)', async () => {
     await expect(
       h.pool.query('SELECT * FROM platform_memberships_of($1)', [owner.userId]),
-    ).rejects.toThrow(/permission denied/);
+    ).rejects.toThrow(/permission denied|does not exist/); // revoked in 0005, dropped in 0006
     const bogus = await h.pool.query('SELECT * FROM platform_memberships_of_session($1)', [
       Buffer.alloc(32, 7),
     ]);

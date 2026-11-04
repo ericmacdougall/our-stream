@@ -99,6 +99,7 @@ export async function ensureBossSchema(
   schema: string,
 ): Promise<'created' | 'migrated' | 'current'> {
   const client = await pool.connect();
+  let failed = false;
   try {
     // Session-level lock (not transactional: the plans commit on their own) so concurrent worker
     // starts take turns; pg-boss's plan additionally guards the version row.
@@ -120,10 +121,18 @@ export async function ensureBossSchema(
       if (current >= target) return 'current';
       await runPlan(client, getMigrationPlans(schema, current));
       return 'migrated';
+    } catch (err) {
+      failed = true;
+      // A failure inside the plan's BEGIN block leaves the session in an aborted transaction; end it
+      // so the unlock below cannot mask the real error with 25P02.
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw err;
     } finally {
-      await client.query('SELECT pg_advisory_unlock($1)', [BOOTSTRAP_LOCK_KEY]);
+      await client
+        .query('SELECT pg_advisory_unlock($1)', [BOOTSTRAP_LOCK_KEY])
+        .catch(() => undefined);
     }
   } finally {
-    client.release();
+    client.release(failed);
   }
 }
