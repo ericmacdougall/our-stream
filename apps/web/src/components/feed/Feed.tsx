@@ -59,8 +59,6 @@ export function Feed({ streamId }: { streamId?: string }) {
   const itemRefs = useRef(new Map<string, HTMLElement>());
   const loadingRef = useRef(false);
   const generation = useRef(0);
-  const viewStarted = useRef(new Set<string>());
-  const viewCompleted = useRef(new Set<string>());
   const stateRef = useRef(state);
   stateRef.current = state;
   // While a programmatic (keyboard / auto-advance) scroll is in flight the observer must not flip
@@ -111,8 +109,6 @@ export function Feed({ streamId }: { streamId?: string }) {
 
   const refetchAll = useCallback(async () => {
     await clearAllCaches();
-    viewStarted.current.clear();
-    viewCompleted.current.clear();
     loadingRef.current = false;
     setActiveIndex(0);
     await loadPage(null, true);
@@ -240,20 +236,6 @@ export function Feed({ streamId }: { streamId?: string }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [activeIndex, settings.singleKeyShortcuts, scrollToIndex, togglePlay]);
 
-  async function sendView(item: Item, completed: boolean) {
-    const set = completed ? viewCompleted.current : viewStarted.current;
-    if (set.has(item.id)) return;
-    set.add(item.id);
-    try {
-      await browserApi().POST('/v1/content/{id}/view', {
-        params: { path: { id: item.id } },
-        body: { versionId: item.versionId, completed },
-      });
-    } catch {
-      set.delete(item.id);
-    }
-  }
-
   // The server says a clip is gone for this viewer (retracted, expired, access revoked): drop it,
   // close anything open for it, announce, and keep the keyboard user on a real item.
   function markUnavailable(id: string) {
@@ -271,8 +253,6 @@ export function Feed({ streamId }: { streamId?: string }) {
   }
 
   function onEnded(index: number) {
-    const item = state.items[index];
-    if (item) void sendView(item, true);
     if (settings.autoAdvance && !reducedMotion && index === activeIndex) {
       const next = index + 1;
       if (next < state.items.length) scrollToIndex(next);
@@ -305,7 +285,6 @@ export function Feed({ streamId }: { streamId?: string }) {
             settings={settings}
             reducedMotion={reducedMotion}
             commentsOpen={commentsFor === item.id}
-            onPlaying={() => void sendView(item, false)}
             onEnded={() => onEnded(index)}
             onTogglePlay={togglePlay}
             onExternalLink={(url, label) => setExternal({ url, label })}

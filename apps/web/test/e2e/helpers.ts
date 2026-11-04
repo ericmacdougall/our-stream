@@ -61,10 +61,14 @@ export async function createStream(page: Page, name: string, slug: string) {
 }
 
 /** Uploads the fixture and waits for processing; returns the content id. */
-export async function uploadClip(page: Page, title: string, options: { chapter?: boolean } = {}) {
+export async function uploadClip(
+  page: Page,
+  title: string,
+  options: { chapter?: boolean; description?: string } = {},
+) {
   await page.goto('/upload');
   await page.getByLabel('Title').fill(title);
-  await page.getByLabel('Description').fill(`Description for ${title}`);
+  await page.getByLabel('Description').fill(options.description ?? `Description for ${title}`);
   if (options.chapter) {
     await page.getByRole('button', { name: 'Add chapter' }).click();
     // Both "00:02" and "0:02" are accepted; on blur the field shows the form viewers will see.

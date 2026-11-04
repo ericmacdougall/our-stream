@@ -504,6 +504,77 @@ button.danger {
   min-height: 24px;
 }
 
+/* Search (M1b) */
+.topnav-search {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+}
+.topnav-search input {
+  min-height: 2rem;
+  padding: 0.25rem 0.5rem;
+  max-width: 12rem;
+}
+.topnav-search button {
+  min-height: 2rem;
+  padding: 0.25rem 0.6rem;
+}
+.search-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  align-items: flex-end;
+}
+.search-form .field {
+  margin: 0;
+  flex: 1 1 10rem;
+}
+.search-form .field.grow {
+  flex: 3 1 16rem;
+}
+.search-results {
+  list-style: none;
+  padding: 0;
+  margin: var(--space-2) 0;
+}
+.search-hit {
+  border-top: 1px solid var(--color-border);
+  padding: var(--space-2) 0;
+}
+.search-hit h2 {
+  margin: 0 0 0.25rem;
+  font-size: 1.1rem;
+}
+.snippet {
+  margin: 0.25rem 0;
+}
+.snippet mark {
+  background: #ffe6b3;
+  color: #2b1d00;
+  padding: 0 0.1em;
+  border-radius: 3px;
+}
+.snippet .source {
+  font-size: 0.85rem;
+  margin-right: 0.4rem;
+}
+.inline-player {
+  margin: var(--space-2) 0;
+  background: #000;
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.inline-player .player {
+  max-height: 60vh;
+  display: block;
+}
+.inline-player-controls {
+  display: flex;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  background: var(--color-surface);
+}
+
 /* Reactions (M1b) */
 .reaction-bar {
   display: flex;
@@ -524,6 +595,36 @@ button.danger {
   background: #bfe9dc;
   color: #0b1a16;
   border-color: #bfe9dc;
+}
+/* On light pages (content, search) the byline and reaction row use the page palette (contrast). */
+.page .feed-byline {
+  color: var(--color-muted);
+}
+.page .feed-byline a {
+  color: var(--color-accent);
+}
+.page .chapter {
+  background: var(--color-surface);
+  color: var(--color-text);
+  border-color: var(--color-border);
+}
+.page .chapter.current {
+  background: var(--color-accent);
+  color: var(--color-accent-contrast);
+  border-color: var(--color-accent);
+}
+.page .reaction {
+  background: var(--color-surface);
+  color: var(--color-text);
+  border-color: var(--color-border);
+}
+.page .reaction[aria-pressed='true'] {
+  background: var(--color-accent);
+  color: var(--color-accent-contrast);
+  border-color: var(--color-accent);
+}
+.page .chip {
+  border-color: var(--color-border);
 }
 .reaction .count {
   font-variant-numeric: tabular-nums;

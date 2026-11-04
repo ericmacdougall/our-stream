@@ -110,6 +110,27 @@ export function NavBar() {
             </Link>
           </li>
         </ul>
+        {/* Plain GET form: the query lands in the URL of /search, never in any client log. */}
+        <form
+          role="search"
+          action="/search"
+          method="get"
+          className="topnav-search"
+          data-shortcuts-off="true"
+        >
+          <label htmlFor="nav-search" className="visually-hidden">
+            {t('nav.search')}
+          </label>
+          <input
+            id="nav-search"
+            name="q"
+            type="search"
+            maxLength={200}
+            placeholder={t('nav.searchPlaceholder')}
+            autoComplete="off"
+          />
+          <button type="submit">{t('nav.search')}</button>
+        </form>
         <div className="topnav-user">
           <Link href="/account" aria-current={pathname === '/account' ? 'page' : undefined}>
             <span className="visually-hidden">{t('nav.account')}: </span>

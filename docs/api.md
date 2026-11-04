@@ -49,6 +49,13 @@ and the 409 is presented as a settled outcome. There is no reset endpoint, so a 
 a person believe a different password was stored than the one the server kept: after a lost response
 the web app resends the identical value or abandons it with a warning.
 
+Client notes (web, M1b): the web app reaches every M1b route through `apps/web/src/lib/m1b/api.ts`;
+search queries travel only in the `/search` page URL (plain GET form) and are never logged by the
+client; a transcript hit's `tMs` becomes `/search?q=…&play={id}&t={ms}` (inline player) and
+`/content/{id}?t={ms}` (detail player, once `ContentDetailM1b.media` is present); engagement events
+are sent with a client session key per playback session and retried with the same key, so a replayed
+request is deduplicated server-side (`recorded: false`).
+
 ## Magic links and invites
 
 - `POST /v1/auth/magic-link` always answers `{ok: true}`; a link is sent only when the address has an

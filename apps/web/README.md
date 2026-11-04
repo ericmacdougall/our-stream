@@ -56,7 +56,8 @@ installed Chrome when the bundled Chromium lacks H.264. Reports land in `playwri
 ## Routes
 
 `/` feed (default landing), `/sign-in`, `/sign-up`, `/magic?token=`, `/streams`, `/streams/[id]`,
-`/upload`, `/content/[id]`, `/content/[id]/publish`, `/notifications`, `/account`.
+`/upload`, `/content/[id]` (`?t=<ms>` seeks the player), `/content/[id]/publish`, `/notifications`,
+`/account`, `/search?q=&streamId=&tag=&play=&t=`.
 
 `/sign-in` and `/sign-up` check the session server-side (`getMe`) and redirect a signed-in visitor to
 `/` or the same-origin `?next` target (`src/lib/auth-redirect.ts`; auth pages and non-page paths such
@@ -106,6 +107,20 @@ mutations carry `x-csrf-token`; auth routes are the only unauthenticated ones.
 | POST        | `/v1/comments/{id}/report`         | ReportCommentRequest → Ok                                      |
 | POST        | `/v1/comments/{id}/remove`         | RemoveCommentRequest → Comment (tombstone)                     |
 | POST        | `/v1/content/{id}/share`           | ShareRequest → ShareResponse (`linkPath` only)                 |
+| GET         | `/v1/search`                       | `?q&cursor&limit&streamId&tag` → SearchResponse                |
+| POST        | `/v1/content/{id}/engagement`      | EngagementEventRequest → `{ recorded }`                        |
+
+Search (`/search?q=&streamId=&tag=`) is a plain GET form, so the query lives in the URL and never in
+a client log; `?play=<id>&t=<ms>` opens a result's inline player at that instant and is a shareable
+deep link (a `play` id that is not among the loaded results degrades to a notice linking
+`/content/{id}?t=`). `/content/{id}?t=<ms>` shows the detail's player (media on ContentDetailM1b)
+seeked to `t`, with the same reactions and comments as the feed, so a share link plays for a plain
+member. Engagement (`src/lib/m1b/engagement.ts`, `usePlaybackEngagement`) fires `view_start` once
+per playback session, each 25/50/75 % milestone once when continuous playback crosses it (a seek
+only moves the continuity point: it never fires a milestone and thresholds it skipped stay
+unfired), `complete` on ended, and a new session key for a replay after completion; it counts only
+the active, on-screen player while the tab is visible, and sends the M1a `/view` record from the
+same hook.
 
 M1b routes are called only through `src/lib/m1b/api.ts` (one file to edit on a contract change). The
 feed and detail fields they add (`tags`, `pinned`, `likeCount`, `liked`, `commentCount`) are filled

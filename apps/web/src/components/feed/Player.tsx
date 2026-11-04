@@ -28,8 +28,13 @@ export interface PlayerProps {
   muted: boolean;
   showCaptions: boolean;
   onPlaying?: () => void;
+  onPause?: () => void;
   onEnded?: () => void;
   onTimeMs?: (ms: number) => void;
+  /** After a seek completes, with the new position; milestones never fire from this alone. */
+  onSeeked?: (ms: number) => void;
+  /** The media's own duration once known (fallback when the contract's durationMs is null). */
+  onDurationMs?: (ms: number | null) => void;
   onError?: () => void;
 }
 
@@ -52,8 +57,11 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(prop
     muted,
     showCaptions,
     onPlaying,
+    onPause,
     onEnded,
     onTimeMs,
+    onSeeked,
+    onDurationMs,
     onError,
   } = props;
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -199,11 +207,19 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(prop
       aria-label={title}
       crossOrigin="use-credentials"
       onPlaying={onPlaying}
+      onPause={onPause}
       onEnded={onEnded}
       onError={onError}
       onTimeUpdate={(e: SyntheticEvent<HTMLVideoElement>) =>
         onTimeMs?.(Math.floor(e.currentTarget.currentTime * 1000))
       }
+      onSeeked={(e: SyntheticEvent<HTMLVideoElement>) =>
+        onSeeked?.(Math.floor(e.currentTarget.currentTime * 1000))
+      }
+      onDurationChange={(e: SyntheticEvent<HTMLVideoElement>) => {
+        const d = e.currentTarget.duration;
+        onDurationMs?.(Number.isFinite(d) && d > 0 ? Math.floor(d * 1000) : null);
+      }}
     >
       {captions
         .filter((c) => isSafeMediaPath(c.url))

@@ -58,8 +58,17 @@ test('sign-in, upload and feed have no serious accessibility violations', async 
   await expectNoSeriousViolations(page, 'share-dialog');
   await page.keyboard.press('Escape');
 
-  await page.goto(`/content/${id}`);
+  // Content page with its player, then search results with marks and the inline player.
+  await page.goto(`/content/${id}?t=200`);
+  await expect(page.getByTestId('content-player')).toBeVisible();
   await expectNoSeriousViolations(page, 'content');
+  await page.goto('/search?q=accessible');
+  await expect(page.getByTestId('search-hit')).toHaveCount(1);
+  await expect(page.locator('mark').first()).toBeVisible();
+  await expectNoSeriousViolations(page, 'search');
+  await page.getByTestId('play-hit').click();
+  await expect(page.getByTestId('inline-player')).toBeVisible();
+  await expectNoSeriousViolations(page, 'search-player');
   await page.goto('/notifications');
   await expectNoSeriousViolations(page, 'notifications');
 

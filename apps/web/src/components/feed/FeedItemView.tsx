@@ -8,6 +8,7 @@ import { activeChapterIndex, formatTimestamp } from '@/lib/feed/chapters';
 import { externalHost } from '@/lib/links';
 import type { FeedSettings } from '@/lib/feed/settings';
 import { t } from '@/lib/i18n';
+import { useDocumentVisible, usePlaybackEngagement } from '@/lib/m1b/usePlaybackEngagement';
 import { Player, type PlayerHandle } from './Player';
 import { ReactionBar } from './ReactionBar';
 
@@ -22,7 +23,6 @@ export interface FeedItemViewProps {
   settings: FeedSettings;
   reducedMotion: boolean;
   commentsOpen: boolean;
-  onPlaying: () => void;
   onEnded: () => void;
   onTogglePlay: () => void;
   onExternalLink: (url: string, label: string) => void;
@@ -42,7 +42,6 @@ export const FeedItemView = forwardRef<HTMLElement, FeedItemViewProps>(function 
     settings,
     reducedMotion,
     commentsOpen,
-    onPlaying,
     onEnded,
     onTogglePlay,
     onExternalLink,
@@ -57,6 +56,14 @@ export const FeedItemView = forwardRef<HTMLElement, FeedItemViewProps>(function 
   // Kept in a ref, not state: a ref callback that sets state re-runs on every commit.
   const handleRef = useRef<PlayerHandle | null>(null);
   const chapterIndex = activeChapterIndex(item.chapters, timeMs);
+  // Engagement and the view record count only for the active item in a visible tab.
+  const documentVisible = useDocumentVisible();
+  const playback = usePlaybackEngagement({
+    contentId: item.id,
+    versionId: item.versionId,
+    durationMs: item.durationMs,
+    eligible: active && documentVisible,
+  });
   const headingId = `feed-item-${item.id}-title`;
 
   return (
@@ -83,9 +90,18 @@ export const FeedItemView = forwardRef<HTMLElement, FeedItemViewProps>(function 
           shouldPlay={shouldPlay}
           muted={settings.muted}
           showCaptions={settings.captions}
-          onPlaying={onPlaying}
-          onEnded={onEnded}
-          onTimeMs={setTimeMs}
+          onPlaying={playback.onPlaying}
+          onPause={playback.onPause}
+          onEnded={() => {
+            playback.onEnded();
+            onEnded();
+          }}
+          onTimeMs={(ms) => {
+            setTimeMs(ms);
+            playback.onTimeMs(ms);
+          }}
+          onSeeked={playback.onSeeked}
+          onDurationMs={playback.onDurationMs}
           onError={onError}
         />
         {/* The overlay's visible text is its accessible name (WCAG 2.5.3): no aria-label override. */}

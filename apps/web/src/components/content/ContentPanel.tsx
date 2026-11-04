@@ -10,8 +10,10 @@ import { errorMessage } from '@/lib/errors';
 import { formatTimestamp } from '@/lib/feed/chapters';
 import { externalHost } from '@/lib/links';
 import { t, type MessageId } from '@/lib/i18n';
+import { detailMedia, withM1bDefaults } from '@/lib/m1b/api';
 import { Notice } from '../Notice';
 import { UploadFlow } from '../upload/UploadFlow';
+import { ContentPlayer } from './ContentPlayer';
 import { ProcessingStatus } from './ProcessingStatus';
 import { useContentPolling } from './useContentPolling';
 
@@ -36,7 +38,7 @@ function audienceLabel(a: Detail['audience'][number]): string {
   }
 }
 
-export function ContentPanel({ initial }: { initial: Detail }) {
+export function ContentPanel({ initial, tMs = null }: { initial: Detail; tMs?: number | null }) {
   const router = useRouter();
   const { detail: polled, setDetail } = useContentPolling(initial);
   const detail = polled ?? initial;
@@ -72,6 +74,8 @@ export function ContentPanel({ initial }: { initial: Detail }) {
     }
   }
 
+  // M1b (dfae400): media on the detail once a processed version exists; null on an M1a server.
+  const media = detailMedia(detail);
   const canRetract = detail.canEdit && detail.state !== 'retracted';
   const canPublish =
     detail.canEdit && detail.state !== 'retracted' && detail.currentVersion?.status === 'current';
@@ -94,6 +98,19 @@ export function ContentPanel({ initial }: { initial: Detail }) {
             : ''}
         </p>
       </header>
+      {media && detail.currentVersion && detail.state !== 'retracted' ? (
+        <ContentPlayer
+          key={detail.currentVersion.id}
+          contentId={detail.id}
+          versionId={detail.currentVersion.id}
+          durationMs={detail.currentVersion.durationMs}
+          title={detail.title}
+          language={detail.language}
+          media={media}
+          item={withM1bDefaults(detail)}
+          tMs={tMs}
+        />
+      ) : null}
       <section className="card" aria-labelledby="content-status-heading">
         <h2 id="content-status-heading">{t('content.statusHeading')}</h2>
         <ProcessingStatus version={detail.currentVersion} />
