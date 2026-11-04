@@ -3,14 +3,15 @@
 import Link from 'next/link';
 import { forwardRef, useRef, useState } from 'react';
 import type { z } from 'zod';
-import type { FeedItem } from '@our-stream/contracts';
+import type { FeedItemM1b } from '@our-stream/contracts';
 import { activeChapterIndex, formatTimestamp } from '@/lib/feed/chapters';
 import { externalHost } from '@/lib/links';
 import type { FeedSettings } from '@/lib/feed/settings';
 import { t } from '@/lib/i18n';
 import { Player, type PlayerHandle } from './Player';
+import { ReactionBar } from './ReactionBar';
 
-type Item = z.output<typeof FeedItem>;
+type Item = z.output<typeof FeedItemM1b>;
 
 export interface FeedItemViewProps {
   item: Item;
@@ -20,11 +21,15 @@ export interface FeedItemViewProps {
   shouldPlay: boolean;
   settings: FeedSettings;
   reducedMotion: boolean;
+  commentsOpen: boolean;
   onPlaying: () => void;
   onEnded: () => void;
   onTogglePlay: () => void;
   onExternalLink: (url: string, label: string) => void;
   onError: () => void;
+  onOpenComments: () => void;
+  onShare: () => void;
+  onUnavailable: () => void;
 }
 
 export const FeedItemView = forwardRef<HTMLElement, FeedItemViewProps>(function FeedItemView(
@@ -36,11 +41,15 @@ export const FeedItemView = forwardRef<HTMLElement, FeedItemViewProps>(function 
     shouldPlay,
     settings,
     reducedMotion,
+    commentsOpen,
     onPlaying,
     onEnded,
     onTogglePlay,
     onExternalLink,
     onError,
+    onOpenComments,
+    onShare,
+    onUnavailable,
   },
   ref,
 ) {
@@ -103,6 +112,14 @@ export const FeedItemView = forwardRef<HTMLElement, FeedItemViewProps>(function 
             </span>
           ) : null}
         </p>
+        <ReactionBar
+          contentId={item.id}
+          item={item}
+          commentsOpen={commentsOpen}
+          onOpenComments={onOpenComments}
+          onShare={onShare}
+          onUnavailable={onUnavailable}
+        />
         {item.description ? <p className="feed-description">{item.description}</p> : null}
         {item.chapters.length > 0 ? (
           <nav aria-label={t('upload.chapters')} className="chapters">

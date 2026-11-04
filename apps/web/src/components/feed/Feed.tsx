@@ -6,7 +6,7 @@
 // no auto-advance, no smooth scroll), view events, /sync polling and cursor-based infinite scroll.
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import type { z } from 'zod';
-import type { FeedItem } from '@our-stream/contracts';
+import type { FeedItemM1b } from '@our-stream/contracts';
 import { browserApi } from '@/lib/api/client';
 import { clearAllCaches } from '@/lib/caches';
 import { errorMessage } from '@/lib/errors';
@@ -14,9 +14,13 @@ import {
   emptyFeedState,
   epochsChanged,
   mergePage,
+  removeItem,
   shouldLoadMore,
   type FeedPagesState,
 } from '@/lib/feed/cursor';
+import { withM1bDefaults } from '@/lib/m1b/api';
+import { CommentsPanel } from '../comments/CommentsPanel';
+import { ShareDialog } from '../share/ShareDialog';
 import { feedKeyAction, stepIndex } from '@/lib/feed/keyboard';
 import {
   DEFAULT_FEED_SETTINGS,
@@ -30,7 +34,7 @@ import { Notice } from '../Notice';
 import { ExternalLinkDialog } from './ExternalLinkDialog';
 import { FeedItemView } from './FeedItemView';
 
-type Item = z.output<typeof FeedItem>;
+type Item = z.output<typeof FeedItemM1b>;
 const PAGE_SIZE = 10;
 const SYNC_INTERVAL_MS = 30_000;
 
@@ -47,6 +51,9 @@ export function Feed({ streamId }: { streamId?: string }) {
   const [error, setError] = useState<string | null>(null);
   const [external, setExternal] = useState<{ url: string; label: string } | null>(null);
   const [announce, setAnnounce] = useState('');
+  // M1b: which item's comments drawer is open, which item is being shared.
+  const [commentsFor, setCommentsFor] = useState<string | null>(null);
+  const [shareFor, setShareFor] = useState<string | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef(new Map<string, HTMLElement>());
@@ -87,7 +94,8 @@ export function Feed({ streamId }: { streamId?: string }) {
           setError(message ?? t('error.generic'));
           return;
         }
-        const page = result.data;
+        // M1b fields are additive; an M1a-only server leaves them out, so fill defaults once here.
+        const page = { ...result.data, items: result.data.items.map(withM1bDefaults) };
         setState((prev) => mergePage(reset ? emptyFeedState<Item>() : prev, page));
       } catch {
         if (gen === generation.current) setError(t('error.network'));
@@ -209,6 +217,8 @@ export function Feed({ streamId }: { streamId?: string }) {
       );
       if (!action) return;
       if (document.querySelector('dialog[open]')) return;
+      // Reading or typing in the comments drawer (or any region that opts out) never drives the feed.
+      if (target?.closest('[data-shortcuts-off]')) return;
       e.preventDefault();
       switch (action) {
         case 'next':
@@ -241,6 +251,22 @@ export function Feed({ streamId }: { streamId?: string }) {
       });
     } catch {
       set.delete(item.id);
+    }
+  }
+
+  // The server says a clip is gone for this viewer (retracted, expired, access revoked): drop it,
+  // close anything open for it, announce, and keep the keyboard user on a real item.
+  function markUnavailable(id: string) {
+    const items = stateRef.current.items;
+    const index = items.findIndex((i) => i.id === id);
+    if (index < 0) return;
+    setState((prev) => removeItem(prev, id));
+    setCommentsFor((c) => (c === id ? null : c));
+    setShareFor((s) => (s === id ? null : s));
+    setAnnounce(t('feed.noLongerAvailable'));
+    const next = items[index + 1] ?? items[index - 1];
+    if (next) {
+      requestAnimationFrame(() => itemRefs.current.get(next.id)?.focus({ preventScroll: true }));
     }
   }
 
@@ -278,11 +304,15 @@ export function Feed({ streamId }: { streamId?: string }) {
             shouldPlay={index === activeIndex && shouldPlayActive}
             settings={settings}
             reducedMotion={reducedMotion}
+            commentsOpen={commentsFor === item.id}
             onPlaying={() => void sendView(item, false)}
             onEnded={() => onEnded(index)}
             onTogglePlay={togglePlay}
             onExternalLink={(url, label) => setExternal({ url, label })}
             onError={() => setAnnounce(t('feed.playbackError'))}
+            onOpenComments={() => setCommentsFor((c) => (c === item.id ? null : item.id))}
+            onShare={() => setShareFor(item.id)}
+            onUnavailable={() => markUnavailable(item.id)}
           />
         ))}
         {!loading && state.items.length === 0 && !error ? (
@@ -298,6 +328,31 @@ export function Feed({ streamId }: { streamId?: string }) {
         ) : null}
         <Notice kind="error">{error}</Notice>
       </div>
+      {commentsFor && activeItem ? (
+        <CommentsPanel
+          key={commentsFor}
+          contentId={commentsFor}
+          title={stateRef.current.items.find((i) => i.id === commentsFor)?.title ?? ''}
+          onClose={() => setCommentsFor(null)}
+          onUnavailable={() => markUnavailable(commentsFor)}
+          onCountDelta={(delta) =>
+            setState((prev) => ({
+              ...prev,
+              items: prev.items.map((i) =>
+                i.id === commentsFor
+                  ? { ...i, commentCount: Math.max(0, i.commentCount + delta) }
+                  : i,
+              ),
+            }))
+          }
+        />
+      ) : null}
+      <ShareDialog
+        contentId={shareFor}
+        title={stateRef.current.items.find((i) => i.id === shareFor)?.title ?? ''}
+        onClose={() => setShareFor(null)}
+        onUnavailable={markUnavailable}
+      />
       <div className="feed-controls" role="toolbar" aria-label={t('feed.controls')}>
         <button type="button" onClick={togglePlay} data-testid="toggle-play" disabled={!activeItem}>
           {shouldPlayActive ? t('feed.pause') : t('feed.play')}

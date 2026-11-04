@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { notFound } from 'next/navigation';
 import { StreamDetail } from '@/components/streams/StreamDetail';
+import { listItems } from '@/lib/api/lists';
 import { requireMe } from '@/lib/api/require';
 import { serverApi } from '@/lib/api/server';
 
@@ -18,8 +19,8 @@ export default async function StreamPage({ params }: { params: Promise<{ id: str
     <main id="main" className="page">
       <StreamDetail
         stream={stream.data}
-        members={members.data?.items ?? []}
-        orgMembers={orgMembers.data?.items ?? []}
+        members={listItems(members.data)}
+        orgMembers={listItems(orgMembers.data)}
       />
     </main>
   );

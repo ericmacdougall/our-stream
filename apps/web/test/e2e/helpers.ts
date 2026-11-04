@@ -94,3 +94,42 @@ export async function publishToEveryone(page: Page, contentId: string) {
 export function feedItem(page: Page, contentId: string) {
   return page.locator(`[data-testid="feed-item"][data-content-id="${contentId}"]`);
 }
+
+/**
+ * A mutating API call from the test with the browser's session and CSRF token, for set-up steps
+ * that have no UI yet (retract behind the viewer's back, toggle a stream setting). Goes through the
+ * app's /api rewrite like the browser does.
+ */
+export async function apiCall(
+  page: Page,
+  method: 'POST' | 'PATCH' | 'PUT' | 'DELETE',
+  path: string,
+  body?: unknown,
+): Promise<{ status: number; json: unknown }> {
+  const me = await page.request.get('/api/v1/me');
+  const { csrfToken } = (await me.json()) as { csrfToken: string };
+  const response = await page.request.fetch(`/api${path}`, {
+    method,
+    headers: { 'x-csrf-token': csrfToken, 'content-type': 'application/json' },
+    ...(body === undefined ? {} : { data: body }),
+  });
+  let json: unknown = null;
+  try {
+    json = await response.json();
+  } catch {
+    // Empty body.
+  }
+  return { status: response.status(), json };
+}
+
+/** Signs in through a magic token minted by the mock's invitee hook (mock only). */
+export async function signInInvitee(page: Page, mockUrl: string, orgSlug: string, email: string) {
+  const created = await page.request.post(`${mockUrl}/__mock/invitee`, {
+    data: { orgSlug, email, displayName: 'Invited Person' },
+  });
+  expect(created.ok()).toBe(true);
+  const { token } = (await created.json()) as { token: string };
+  await page.goto(`/magic?token=${token}`);
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  await page.waitForURL((u) => u.pathname === '/');
+}

@@ -4,6 +4,7 @@ import { useState, type FormEvent } from 'react';
 import type { z } from 'zod';
 import type { MemberSummary, Stream, StreamMember, StreamRole } from '@our-stream/contracts';
 import { browserApi } from '@/lib/api/client';
+import { listItems } from '@/lib/api/lists';
 import { errorMessage } from '@/lib/errors';
 import { t, type MessageId } from '@/lib/i18n';
 import { Notice } from '../Notice';
@@ -40,7 +41,7 @@ export function StreamDetail({
     const { data } = await browserApi().GET('/v1/streams/{id}/members', {
       params: { path: { id: stream.id } },
     });
-    if (data) setMembers(data.items);
+    if (data) setMembers(listItems<StreamMember>(data));
   }
 
   async function grant(e: FormEvent) {

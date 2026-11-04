@@ -76,31 +76,45 @@ The contract freezes the shapes (`packages/contracts/src/m1a.ts`); the paths bel
 web app calls (typed in `packages/contracts/src/m1a-paths.ts` until the API emits them). All
 mutations carry `x-csrf-token`; auth routes are the only unauthenticated ones.
 
-| Method      | Path                               | Request → Response                                       |
-| ----------- | ---------------------------------- | -------------------------------------------------------- |
-| POST        | `/v1/auth/signup`                  | SignupRequest → Me (+ session cookie)                    |
-| POST        | `/v1/auth/login`                   | LoginRequest → Me (+ session cookie)                     |
-| POST        | `/v1/auth/magic-link`              | MagicLinkRequest → Ok (always)                           |
-| POST        | `/v1/auth/magic-link/consume`      | MagicLinkConsumeRequest → Me (+ session cookie)          |
-| POST        | `/v1/auth/logout`                  | – → Ok (clears cookie)                                   |
-| POST        | `/v1/auth/password`                | SetPasswordRequest → Ok (409 `password_set` once set)    |
-| GET         | `/v1/me`                           | – → Me                                                   |
-| GET         | `/v1/sync`                         | – → SyncResponse                                         |
-| GET         | `/v1/members`                      | – → `{ items: MemberSummary[] }`                         |
-| GET / POST  | `/v1/streams`                      | – → `{ items: Stream[] }` / CreateStreamRequest → Stream |
-| GET         | `/v1/streams/{id}`                 | – → Stream                                               |
-| GET         | `/v1/streams/{id}/members`         | – → `{ items: { userId, displayName, role }[] }`         |
-| POST        | `/v1/streams/{id}/grants`          | GrantStreamRoleRequest → Ok                              |
-| POST        | `/v1/content`                      | CreateContentRequest → ContentDetail                     |
-| GET / PATCH | `/v1/content/{id}`                 | – / UpdateContentRequest → ContentDetail                 |
-| POST        | `/v1/content/{id}/upload/init`     | UploadInitRequest → UploadInitResponse                   |
-| POST        | `/v1/content/{id}/upload/complete` | UploadCompleteRequest → ContentDetail                    |
-| POST        | `/v1/content/{id}/publish`         | PublishRequest → ContentDetail                           |
-| POST        | `/v1/content/{id}/retract`         | – → ContentDetail                                        |
-| POST        | `/v1/content/{id}/view`            | ViewEventRequest → Ok                                    |
-| GET         | `/v1/feed`                         | `?cursor&limit&streamId` → FeedResponse                  |
-| GET         | `/v1/notifications`                | – → NotificationList                                     |
-| POST        | `/v1/notifications/{id}/read`      | – → Ok                                                   |
+| Method      | Path                               | Request → Response                                             |
+| ----------- | ---------------------------------- | -------------------------------------------------------------- |
+| POST        | `/v1/auth/signup`                  | SignupRequest → Me (+ session cookie)                          |
+| POST        | `/v1/auth/login`                   | LoginRequest → Me (+ session cookie)                           |
+| POST        | `/v1/auth/magic-link`              | MagicLinkRequest → Ok (always)                                 |
+| POST        | `/v1/auth/magic-link/consume`      | MagicLinkConsumeRequest → Me (+ session cookie)                |
+| POST        | `/v1/auth/logout`                  | – → Ok (clears cookie)                                         |
+| POST        | `/v1/auth/password`                | SetPasswordRequest → Ok (409 `password_set` once set)          |
+| GET         | `/v1/me`                           | – → Me                                                         |
+| GET         | `/v1/sync`                         | – → SyncResponse                                               |
+| GET         | `/v1/members`                      | – → `{ items: MemberSummary[] }`                               |
+| GET / POST  | `/v1/streams`                      | – → `{ items: Stream[] }` / CreateStreamRequest → Stream       |
+| GET         | `/v1/streams/{id}`                 | – → Stream                                                     |
+| GET         | `/v1/streams/{id}/members`         | – → `{ items: { userId, displayName, role }[] }`               |
+| POST        | `/v1/streams/{id}/grants`          | GrantStreamRoleRequest → Ok                                    |
+| POST        | `/v1/content`                      | CreateContentRequest → ContentDetail                           |
+| GET / PATCH | `/v1/content/{id}`                 | – / UpdateContentRequest → ContentDetail                       |
+| POST        | `/v1/content/{id}/upload/init`     | UploadInitRequest → UploadInitResponse                         |
+| POST        | `/v1/content/{id}/upload/complete` | UploadCompleteRequest → ContentDetail                          |
+| POST        | `/v1/content/{id}/publish`         | PublishRequest → ContentDetail                                 |
+| POST        | `/v1/content/{id}/retract`         | – → ContentDetail                                              |
+| POST        | `/v1/content/{id}/view`            | ViewEventRequest → Ok                                          |
+| GET         | `/v1/feed`                         | `?cursor&limit&streamId` → FeedResponse                        |
+| GET         | `/v1/notifications`                | – → NotificationList                                           |
+| POST        | `/v1/notifications/{id}/read`      | – → Ok                                                         |
+| POST/DELETE | `/v1/content/{id}/like`            | – → ReactionResponse (idempotent)                              |
+| GET / POST  | `/v1/content/{id}/comments`        | `?cursor&limit` → CommentList / CreateCommentRequest → Comment |
+| POST        | `/v1/comments/{id}/report`         | ReportCommentRequest → Ok                                      |
+| POST        | `/v1/comments/{id}/remove`         | RemoveCommentRequest → Comment (tombstone)                     |
+| POST        | `/v1/content/{id}/share`           | ShareRequest → ShareResponse (`linkPath` only)                 |
+
+M1b routes are called only through `src/lib/m1b/api.ts` (one file to edit on a contract change). The
+feed and detail fields they add (`tags`, `pinned`, `likeCount`, `liked`, `commentCount`) are filled
+with defaults when a server leaves them out. State rules live in `src/lib/m1b/*.ts` with unit tests:
+likes keep one request in flight and retry identically after a lost response; a comment draft keeps
+one `clientKey` across edits, retries and reloads (sessionStorage) and is frozen behind a Retry
+button after three lost responses; `content_not_found` on any action removes the item from the feed
+("no longer available"). The comments drawer sets `data-shortcuts-off`, which switches the feed's
+keyboard shortcuts off while focus is inside it.
 
 Polling expectation: after `upload/complete`, `GET /v1/content/{id}` must expose the uploaded
 version's progress. The web app waits until `currentVersion.id` equals the version returned by

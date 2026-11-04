@@ -45,9 +45,10 @@ export default defineConfig({
           },
         ]),
     {
+      // Loopback only: a shared test host must never expose the test web server.
       command: process.env['E2E_SKIP_BUILD']
-        ? `pnpm exec next start -p ${webPort}`
-        : `node scripts/build-sw.mjs && pnpm exec next build && pnpm exec next start -p ${webPort}`,
+        ? `pnpm exec next start -H 127.0.0.1 -p ${webPort}`
+        : `node scripts/build-sw.mjs && pnpm exec next build && pnpm exec next start -H 127.0.0.1 -p ${webPort}`,
       url: baseURL + '/sign-in',
       reuseExistingServer: !process.env['CI'],
       timeout: 300_000,

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { notFound } from 'next/navigation';
 import { PublishForm } from '@/components/publish/PublishForm';
+import { listItems } from '@/lib/api/lists';
 import { requireMe } from '@/lib/api/require';
 import { serverApi } from '@/lib/api/server';
 import { t } from '@/lib/i18n';
@@ -22,8 +23,8 @@ export default async function PublishPage({ params }: { params: Promise<{ id: st
       </header>
       <PublishForm
         content={content.data}
-        streams={streams.data?.items ?? []}
-        members={members.data?.items ?? []}
+        streams={listItems(streams.data)}
+        members={listItems(members.data)}
       />
     </main>
   );

@@ -42,6 +42,22 @@ test('sign-in, upload and feed have no serious accessibility violations', async 
   await expect(feedItem(page, id)).toBeVisible();
   await expectNoSeriousViolations(page, 'feed');
 
+  // Reactions, the comments drawer (with a posted comment and the remove dialog) and share dialog.
+  await feedItem(page, id).getByTestId('comments-button').click();
+  const panel = page.getByTestId('comments-panel');
+  await panel.getByLabel('Write a comment').fill('An accessible comment');
+  await panel.getByTestId('post-comment').click();
+  await expect(panel.getByTestId('comment')).toHaveCount(1);
+  await expectNoSeriousViolations(page, 'feed-comments');
+  await panel.getByTestId('remove-button').click();
+  await expect(page.getByRole('dialog', { name: 'Remove this comment?' })).toBeVisible();
+  await expectNoSeriousViolations(page, 'remove-dialog');
+  await page.keyboard.press('Escape');
+  await feedItem(page, id).getByTestId('share-button').click();
+  await expect(page.getByTestId('share-dialog')).toBeVisible();
+  await expectNoSeriousViolations(page, 'share-dialog');
+  await page.keyboard.press('Escape');
+
   await page.goto(`/content/${id}`);
   await expectNoSeriousViolations(page, 'content');
   await page.goto('/notifications');

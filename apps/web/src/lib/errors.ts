@@ -16,6 +16,20 @@ const KNOWN: Record<string, MessageId> = {
   csrf: 'error.sessionExpired',
   token_invalid: 'error.tokenInvalid',
   token_expired: 'error.tokenInvalid',
+  // M1b (packages/contracts/src/m1b.ts header).
+  comments_disabled: 'error.commentsDisabled',
+  comment_blocked: 'error.commentBlocked',
+  comment_not_found: 'error.commentGone',
+  bad_parent: 'error.commentGone',
+  idempotency_mismatch: 'error.idempotencyMismatch',
+  moderation_forbidden: 'error.forbidden',
+  pin_forbidden: 'error.pinForbidden',
+  not_in_audience: 'error.notInAudience',
+  not_published: 'error.unavailable',
+  self_share: 'error.selfShare',
+  stale_version: 'error.unavailable',
+  content_not_found: 'error.unavailable',
+  bad_cursor: 'error.generic',
 };
 
 export function describeError(code: string | undefined, status?: number): string {

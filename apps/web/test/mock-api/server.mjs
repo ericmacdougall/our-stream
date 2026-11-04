@@ -28,6 +28,18 @@ const db = {
   uploads: new Map(), // uploadId -> { versionId, contentId, parts: Map }
   views: new Map(), // `${userId}:${contentId}` -> { versionId, completed }
   notifications: new Map(), // userId -> Notification[]
+  // ---- M1b ----
+  likes: new Map(), // `${userId}:${contentId}` -> true
+  comments: new Map(), // id -> comment (contract shape without replies)
+  commentKeys: new Map(), // `${userId}:${contentId}:${clientKey}` -> commentId
+  reports: new Map(), // commentId -> count
+  engagement: new Map(), // `${userId}:${contentId}:${versionId}:${sessionKey}:${type}` -> event
+  engagementSessions: new Map(), // `${userId}:${contentId}` -> Set(sessionKey)
+  pins: new Map(), // `${contentId}:${streamId|'org'}` -> true
+  tags: new Map(), // contentId -> EventTag[]
+  orgSettings: new Map(), // orgId -> OrgSettings
+  streamSettings: new Map(), // streamId -> { commentsEnabled }
+  preferences: new Map(), // userId -> { emailDigest }
 };
 
 const now = () => new Date().toISOString();
@@ -97,6 +109,8 @@ function me(user, currentSession) {
       ? [{ orgId: org.id, slug: org.slug, name: org.name, role: user.role, status: user.status }]
       : [],
     csrfToken: session?.csrf ?? '',
+    // M1b (MeM1b): lets /account hide the set-password form for password accounts.
+    hasPassword: user.password !== null,
   };
 }
 
@@ -186,6 +200,13 @@ function contentDetail(c, user) {
     audience: c.audience,
     canEdit: c.ownerId === user.id || user.role === 'owner' || user.role === 'admin',
     contentEpoch: c.contentEpoch,
+    // M1b (ContentDetailM1b): additive fields and media for /content/{id}?t=.
+    ...m1bFields(c, user),
+    commentsEnabled: commentsEnabledFor(c),
+    media: (() => {
+      const v = db.versions.get(c.currentVersionId);
+      return v && v.status === 'current' ? mediaUrls(c, v) : null;
+    })(),
   };
 }
 
@@ -246,6 +267,8 @@ function feedItem(c, user) {
       }),
     viewed: Boolean(view),
     contentEpoch: c.contentEpoch,
+    // M1b (FeedItemM1b).
+    ...m1bFields(c, user),
   };
 }
 
@@ -702,11 +725,19 @@ route('GET', '/v1/feed', async ({ auth, url }) => {
     validate(Number.isInteger(parsed) && parsed >= 0, 'cursor');
     offset = parsed;
   }
+  // M1b filters: a tag narrows to items carrying it; pinned=true narrows to items pinned org-wide
+  // or in a stream the caller can access (the given stream only when streamId is set). Filters can
+  // only narrow: every item still passes isVisible first.
+  const tag = url.searchParams.get('tag');
+  if (tag !== null) validate(EVENT_TAGS.includes(tag), 'tag');
+  const pinnedOnly = url.searchParams.get('pinned') === 'true';
   const visible = [...db.content.values()]
     .filter((c) => isVisible(c, auth.user))
     .filter(
       (c) => !streamId || c.audience.some((a) => a.type === 'stream' && a.streamId === streamId),
     )
+    .filter((c) => !tag || (db.tags.get(c.id) ?? []).includes(tag))
+    .filter((c) => !pinnedOnly || isPinnedFor(c, auth.user, streamId))
     .sort((a, b) => Date.parse(b.publishAt) - Date.parse(a.publishAt));
   const page = visible.slice(offset, offset + limit);
   const nextOffset = offset + limit;
@@ -730,6 +761,589 @@ route('POST', '/v1/notifications/:id/read', async ({ auth, params }) => {
   if (!n) throw new HttpError(404, 'not_found');
   n.readAt = n.readAt ?? now();
   return { ok: true };
+});
+
+// ---- M1b: reactions, comments, share, search, engagement, stats, tags, pins, settings ----
+// Emulates the contract rules the e2e relies on: readerVisible on every read (an invisible item is
+// indistinguishable from a missing one: content_not_found), clientKey replay 200 vs 409, body
+// normalisation, commentsEnabled = org AND every audience stream, canModerate/canRemove, reportCount
+// for moderators only, tombstones, bad_parent, engagement dedupe per (session, content, version,
+// type) with the 50-key cap, author-only stats with viewers only under `named`, pin_forbidden /
+// not_in_audience, self_share and delivered:false. Not emulated: rate budgets (429).
+const EVENT_TAGS = ['onboarding', 'announcement', 'current-events', 'training'];
+const ENGAGEMENT_TYPES = ['view_start', 'progress_25', 'progress_50', 'progress_75', 'complete'];
+const STOP_WORDS = new Set(['the', 'a', 'an', 'and', 'of', 'to', 'in', 'is', 'it', 'for', 'on']);
+
+function orgSettingsFor(orgId) {
+  let s = db.orgSettings.get(orgId);
+  if (!s) {
+    s = {
+      privacyMode: 'identified_for_required_only',
+      commentsEnabled: true,
+      engagementRetentionDays: 395,
+      commentScanPolicy: 'off',
+    };
+    db.orgSettings.set(orgId, s);
+  }
+  return s;
+}
+
+function commentsEnabledFor(c) {
+  if (!orgSettingsFor(c.orgId).commentsEnabled) return false;
+  return c.audience.every(
+    (a) => a.type !== 'stream' || (db.streamSettings.get(a.streamId)?.commentsEnabled ?? true),
+  );
+}
+
+function canModerate(c, user) {
+  if (user.role === 'owner' || user.role === 'admin') return true;
+  return c.audience.some((a) => {
+    if (a.type !== 'stream') return false;
+    const s = db.streams.get(a.streamId);
+    const role = s ? streamRoleFor(s, user) : null;
+    return role === 'moderator' || role === 'owner';
+  });
+}
+
+function isPinnedFor(c, user, streamId = null) {
+  if (streamId) return db.pins.has(`${c.id}:${streamId}`);
+  if (db.pins.has(`${c.id}:org`)) return true;
+  return c.audience.some((a) => {
+    if (a.type !== 'stream' || !db.pins.has(`${c.id}:${a.streamId}`)) return false;
+    const s = db.streams.get(a.streamId);
+    return Boolean(s && streamRoleFor(s, user));
+  });
+}
+
+function likeCountFor(contentId) {
+  let n = 0;
+  for (const key of db.likes.keys()) if (key.endsWith(`:${contentId}`)) n += 1;
+  return n;
+}
+
+function visibleCommentCount(contentId) {
+  let n = 0;
+  for (const cm of db.comments.values())
+    if (cm.contentId === contentId && cm.state === 'visible') n += 1;
+  return n;
+}
+
+function m1bFields(c, user) {
+  return {
+    tags: db.tags.get(c.id) ?? [],
+    pinned: isPinnedFor(c, user),
+    likeCount: likeCountFor(c.id),
+    liked: db.likes.has(`${user.id}:${c.id}`),
+    commentCount: visibleCommentCount(c.id),
+  };
+}
+
+/** The item for a reaction/comment/share/engagement call: invisible answers content_not_found. */
+function visibleOrThrow(id, user) {
+  const c = db.content.get(id);
+  if (!c || !isVisible(c, user)) throw new HttpError(404, 'content_not_found', 'no such content');
+  return c;
+}
+
+function offsetCursor(cursor) {
+  if (!cursor) return 0;
+  const parsed = Number(Buffer.from(cursor, 'base64url').toString('utf8'));
+  if (!Number.isInteger(parsed) || parsed < 0) throw new HttpError(400, 'bad_cursor', 'bad cursor');
+  return parsed;
+}
+const nextCursor = (offset, limit, total) =>
+  offset + limit < total ? Buffer.from(String(offset + limit)).toString('base64url') : null;
+const pageLimit = (url, fallback = 20) =>
+  Math.min(50, Math.max(1, Number(url.searchParams.get('limit') ?? fallback) || fallback));
+
+// reactions
+function reaction(c, user) {
+  return { liked: db.likes.has(`${user.id}:${c.id}`), likeCount: likeCountFor(c.id) };
+}
+route('POST', '/v1/content/:id/like', async ({ auth, params }) => {
+  const c = visibleOrThrow(params.id, auth.user);
+  db.likes.set(`${auth.user.id}:${c.id}`, true);
+  return reaction(c, auth.user);
+});
+route('DELETE', '/v1/content/:id/like', async ({ auth, params }) => {
+  const c = visibleOrThrow(params.id, auth.user);
+  db.likes.delete(`${auth.user.id}:${c.id}`);
+  return reaction(c, auth.user);
+});
+
+// comments
+function normaliseBody(raw) {
+  if (typeof raw !== 'string') return '';
+  // C0/C1 controls except newline and tab, then bidi controls and zero-width space/joiner/BOM.
+  // Built from escapes so no literal control or bidi character sits in this source file.
+  // eslint-disable-next-line no-control-regex -- the whole point is to strip these characters
+  const controls = new RegExp('[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f-\\u009f]', 'g');
+  const invisible = new RegExp('[\\u202a-\\u202e\\u2066-\\u2069\\u200b\\u2060\\ufeff]', 'g');
+  return raw.normalize('NFC').replace(controls, '').replace(invisible, '').trim();
+}
+function commentView(cm, c, user) {
+  const moderator = canModerate(c, user);
+  const view = {
+    id: cm.id,
+    contentId: cm.contentId,
+    parentId: cm.parentId,
+    author:
+      cm.state === 'removed'
+        ? null
+        : { id: cm.authorId, displayName: db.users.get(cm.authorId)?.displayName ?? '' },
+    body: cm.state === 'removed' ? null : cm.body,
+    state: cm.state,
+    createdAt: cm.createdAt,
+    removedAt: cm.removedAt,
+    canRemove: cm.state === 'visible' && (cm.authorId === user.id || moderator),
+  };
+  if (moderator) view.reportCount = db.reports.get(cm.id) ?? 0;
+  return view;
+}
+function threadView(root, c, user, limit) {
+  const replies = [...db.comments.values()]
+    .filter((x) => x.parentId === root.id)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  return {
+    ...commentView(root, c, user),
+    replies: replies.slice(0, limit).map((x) => commentView(x, c, user)),
+    replyCount: replies.length,
+  };
+}
+route('GET', '/v1/content/:id/comments', async ({ auth, params, url }) => {
+  const c = visibleOrThrow(params.id, auth.user);
+  const limit = pageLimit(url);
+  const offset = offsetCursor(url.searchParams.get('cursor'));
+  const roots = [...db.comments.values()]
+    .filter((x) => x.contentId === c.id && x.parentId === null)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  return {
+    items: roots.slice(offset, offset + limit).map((r) => threadView(r, c, auth.user, limit)),
+    nextCursor: nextCursor(offset, limit, roots.length),
+    commentsEnabled: commentsEnabledFor(c),
+    canModerate: canModerate(c, auth.user),
+  };
+});
+route('POST', '/v1/content/:id/comments', async ({ auth, params, body }) => {
+  const c = visibleOrThrow(params.id, auth.user);
+  if (!commentsEnabledFor(c)) throw new HttpError(409, 'comments_disabled', 'comments disabled');
+  const text = normaliseBody(body.body);
+  validate(text.length >= 1 && text.length <= 2000, 'body');
+  if (orgSettingsFor(c.orgId).commentScanPolicy === 'block' && /\b\d{3}-\d{2}-\d{4}\b/.test(text)) {
+    throw new HttpError(400, 'comment_blocked', 'blocked by the comment scanner');
+  }
+  let parentId = body.parentId ?? null;
+  if (parentId !== null) {
+    validate(typeof parentId === 'string', 'parentId');
+    const parent = db.comments.get(parentId);
+    if (!parent || parent.contentId !== c.id || parent.state !== 'visible') {
+      throw new HttpError(404, 'bad_parent', 'no such parent');
+    }
+    if (parent.parentId !== null) parentId = parent.parentId; // replies attach to the root
+  }
+  const clientKey = body.clientKey;
+  if (clientKey !== undefined) validate(str(clientKey, 1, 64), 'clientKey');
+  const replayKey = clientKey ? `${auth.user.id}:${c.id}:${clientKey}` : null;
+  if (replayKey && db.commentKeys.has(replayKey)) {
+    const existing = db.comments.get(db.commentKeys.get(replayKey));
+    if (existing && existing.body === text && existing.parentId === parentId) {
+      return threadView(existing, c, auth.user, 50);
+    }
+    throw new HttpError(409, 'idempotency_mismatch', 'same key, different comment');
+  }
+  const cm = {
+    id: randomUUID(),
+    contentId: c.id,
+    parentId,
+    authorId: auth.user.id,
+    body: text,
+    state: 'visible',
+    createdAt: now(),
+    removedAt: null,
+  };
+  db.comments.set(cm.id, cm);
+  if (replayKey) db.commentKeys.set(replayKey, cm.id);
+  if (c.ownerId !== auth.user.id) {
+    notify(c.ownerId, {
+      kind: 'comment.created',
+      reason: 'author',
+      contentId: c.id,
+      title: c.title,
+    });
+  }
+  return threadView(cm, c, auth.user, 50);
+});
+function commentOrThrow(id, user) {
+  const cm = db.comments.get(id);
+  const c = cm ? db.content.get(cm.contentId) : null;
+  if (!cm || !c || !isVisible(c, user) || cm.state !== 'visible') {
+    throw new HttpError(404, 'comment_not_found', 'no such comment');
+  }
+  return { cm, c };
+}
+route('POST', '/v1/comments/:id/report', async ({ auth, params, body }) => {
+  const { cm } = commentOrThrow(params.id, auth.user);
+  validate(body.reason === undefined || str(body.reason, 0, 500), 'reason');
+  db.reports.set(cm.id, (db.reports.get(cm.id) ?? 0) + 1);
+  return { ok: true };
+});
+route('POST', '/v1/comments/:id/remove', async ({ auth, params, body }) => {
+  const { cm, c } = commentOrThrow(params.id, auth.user);
+  validate(body.reason === undefined || str(body.reason, 0, 500), 'reason');
+  if (cm.authorId !== auth.user.id && !canModerate(c, auth.user)) {
+    throw new HttpError(403, 'moderation_forbidden', 'not a moderator');
+  }
+  cm.state = 'removed';
+  cm.removedAt = now();
+  return threadView(cm, c, auth.user, 50);
+});
+
+// share as link (never writes tuples)
+route('POST', '/v1/content/:id/share', async ({ auth, params, body }) => {
+  const c = visibleOrThrow(params.id, auth.user);
+  validate(UUID_RE.test(body.userId ?? ''), 'userId');
+  if (body.userId === auth.user.id)
+    throw new HttpError(409, 'self_share', 'cannot share with self');
+  const recipient = db.users.get(body.userId);
+  const delivered = Boolean(
+    recipient &&
+    recipient.orgId === c.orgId &&
+    recipient.status === 'active' &&
+    isVisible(c, recipient),
+  );
+  if (delivered) {
+    notify(recipient.id, {
+      kind: 'content.shared',
+      reason: 'share',
+      contentId: c.id,
+      title: c.title,
+    });
+  }
+  return { delivered, linkPath: `/content/${c.id}` };
+});
+
+// search (ADR-0013 shape; word matching stands in for Postgres full-text)
+function searchTerms(q) {
+  const include = [];
+  const exclude = [];
+  const re = /-?"([^"]+)"|(-?\S+)/g;
+  let m;
+  while ((m = re.exec(q)) !== null) {
+    const raw = (m[1] ?? m[2] ?? '').toLowerCase();
+    const negative = (m[0] ?? '').startsWith('-');
+    const term = raw.replace(/^-/, '');
+    if (!term || term === 'or') continue;
+    const words = term.split(/\s+/).filter((w) => !STOP_WORDS.has(w));
+    if (words.length === 0) continue;
+    (negative ? exclude : include).push(words.join(' '));
+  }
+  return { include, exclude };
+}
+function findRanges(text, term) {
+  const ranges = [];
+  const hay = text.toLowerCase();
+  let from = 0;
+  for (;;) {
+    const at = hay.indexOf(term, from);
+    if (at < 0) break;
+    ranges.push([at, at + term.length]);
+    from = at + term.length;
+  }
+  return ranges;
+}
+function transcriptWindows(c) {
+  // Synthetic transcript: each sentence of the description is a 2 s window.
+  return (c.description ?? '')
+    .split(/(?<=[.!?])\s+/)
+    .filter((s) => s.trim() !== '')
+    .map((text, i) => ({ text: text.trim(), tMs: i * 2000 }));
+}
+function snippetFor(source, text, tMs, include) {
+  const ranges = include
+    .flatMap((term) => findRanges(text, term))
+    .sort((a, b) => a[0] - b[0])
+    .filter((r, i, all) => i === 0 || r[0] >= all[i - 1][1]);
+  if (ranges.length === 0) return null;
+  return { source, text, ranges, tMs };
+}
+route('GET', '/v1/search', async ({ auth, url }) => {
+  const q = url.searchParams.get('q') ?? '';
+  validate(str(q, 1, 200), 'q');
+  const limit = pageLimit(url);
+  const offset = offsetCursor(url.searchParams.get('cursor'));
+  const streamId = url.searchParams.get('streamId');
+  const tag = url.searchParams.get('tag');
+  if (tag !== null) validate(EVENT_TAGS.includes(tag), 'tag');
+  const { include, exclude } = searchTerms(q);
+  const epochs = {
+    authzEpoch: auth.user.authzEpoch,
+    orgContentEpoch: orgOf(auth.user).contentEpoch,
+  };
+  if (include.length === 0) return { items: [], total: 0, nextCursor: null, ...epochs };
+  const hits = [];
+  for (const c of db.content.values()) {
+    if (!isVisible(c, auth.user)) continue;
+    if (streamId && !c.audience.some((a) => a.type === 'stream' && a.streamId === streamId))
+      continue;
+    if (tag && !(db.tags.get(c.id) ?? []).includes(tag)) continue;
+    const haystack = `${c.title} ${c.description}`.toLowerCase();
+    if (exclude.some((term) => haystack.includes(term))) continue;
+    const snippets = [
+      snippetFor('title', c.title, null, include),
+      snippetFor('description', c.description, null, include),
+      ...transcriptWindows(c).map((w) => snippetFor('transcript', w.text, w.tMs, include)),
+    ].filter(Boolean);
+    if (snippets.length === 0) continue;
+    const matched = include.filter((term) => haystack.includes(term)).length;
+    const item = feedItem(c, auth.user);
+    hits.push({
+      id: item.id,
+      kind: item.kind,
+      title: item.title,
+      description: item.description,
+      publishAt: item.publishAt,
+      owner: item.owner,
+      versionId: item.versionId,
+      durationMs: item.durationMs,
+      width: item.width,
+      height: item.height,
+      media: item.media,
+      streams: item.streams,
+      tags: item.tags,
+      snippets,
+      score: Math.min(1, matched / include.length),
+    });
+  }
+  hits.sort((a, b) => b.score - a.score || Date.parse(b.publishAt) - Date.parse(a.publishAt));
+  return {
+    items: hits.slice(offset, offset + limit),
+    total: Math.min(1000, hits.length),
+    nextCursor: nextCursor(offset, limit, hits.length),
+    ...epochs,
+  };
+});
+
+// engagement and stats
+route('POST', '/v1/content/:id/engagement', async ({ auth, params, body }) => {
+  const c = visibleOrThrow(params.id, auth.user);
+  validate(UUID_RE.test(body.versionId ?? ''), 'versionId');
+  validate(str(body.sessionKey, 1, 64), 'sessionKey');
+  validate(ENGAGEMENT_TYPES.includes(body.type), 'type');
+  validate(
+    body.positionMs === undefined || (Number.isInteger(body.positionMs) && body.positionMs >= 0),
+    'positionMs',
+  );
+  if (body.versionId !== c.currentVersionId) throw new HttpError(409, 'stale_version', 'stale');
+  const sessionsKey = `${auth.user.id}:${c.id}`;
+  const sessions = db.engagementSessions.get(sessionsKey) ?? new Set();
+  if (!sessions.has(body.sessionKey) && sessions.size >= 50) return { recorded: false };
+  sessions.add(body.sessionKey);
+  db.engagementSessions.set(sessionsKey, sessions);
+  const key = `${auth.user.id}:${c.id}:${body.versionId}:${body.sessionKey}:${body.type}`;
+  if (db.engagement.has(key)) return { recorded: false };
+  const prior = [...db.engagement.values()].filter(
+    (e) => e.userId === auth.user.id && e.contentId === c.id,
+  );
+  const rewatch =
+    body.type === 'view_start' &&
+    prior.some(
+      (e) =>
+        e.sessionKey !== body.sessionKey && (e.type === 'complete' || e.type === 'progress_75'),
+    );
+  db.engagement.set(key, {
+    userId: auth.user.id,
+    contentId: c.id,
+    versionId: body.versionId,
+    sessionKey: body.sessionKey,
+    type: body.type,
+    positionMs: body.positionMs ?? 0,
+    at: now(),
+    rewatch,
+  });
+  if (body.type === 'view_start' || body.type === 'complete') {
+    const viewKey = `${auth.user.id}:${c.id}`;
+    const prev = db.views.get(viewKey);
+    db.views.set(viewKey, {
+      versionId: body.versionId,
+      completed: body.type === 'complete' || Boolean(prev?.completed),
+    });
+  }
+  return { recorded: true };
+});
+route('GET', '/v1/content/:id/stats', async ({ auth, params }) => {
+  const c = db.content.get(params.id);
+  if (!c || c.orgId !== auth.user.orgId) throw new HttpError(404, 'content_not_found', 'no such');
+  if (c.ownerId !== auth.user.id && auth.user.role !== 'owner' && auth.user.role !== 'admin') {
+    throw new HttpError(403, 'forbidden', 'author only');
+  }
+  const events = [...db.engagement.values()].filter((e) => e.contentId === c.id);
+  const byUser = new Map();
+  for (const e of events) {
+    const u = byUser.get(e.userId) ?? {
+      userId: e.userId,
+      first: e.at,
+      last: e.at,
+      max: 0,
+      completed: false,
+      watchCount: 0,
+    };
+    u.first = e.at < u.first ? e.at : u.first;
+    u.last = e.at > u.last ? e.at : u.last;
+    if (e.type === 'view_start') u.watchCount += 1;
+    if (e.type === 'progress_25') u.max = Math.max(u.max, 25);
+    if (e.type === 'progress_50') u.max = Math.max(u.max, 50);
+    if (e.type === 'progress_75') u.max = Math.max(u.max, 75);
+    if (e.type === 'complete') {
+      u.max = 100;
+      u.completed = true;
+    }
+    byUser.set(e.userId, u);
+  }
+  const count = (type) => events.filter((e) => e.type === type).length;
+  const stats = {
+    contentId: c.id,
+    privacyMode: orgSettingsFor(c.orgId).privacyMode,
+    uniqueViewers: byUser.size,
+    viewStarts: count('view_start'),
+    completions: count('complete'),
+    rewatches: events.filter((e) => e.rewatch).length,
+    milestones: { p25: count('progress_25'), p50: count('progress_50'), p75: count('progress_75') },
+    likes: likeCountFor(c.id),
+    comments: visibleCommentCount(c.id),
+  };
+  if (stats.privacyMode === 'named') {
+    stats.viewers = [...byUser.values()].map((u) => ({
+      userId: u.userId,
+      displayName: db.users.get(u.userId)?.displayName ?? '',
+      firstViewedAt: u.first,
+      lastViewedAt: u.last,
+      maxProgressPct: u.max,
+      completed: u.completed,
+      watchCount: u.watchCount,
+    }));
+  }
+  return stats;
+});
+
+// tags and pins
+function detailWithM1b(c, user) {
+  return contentDetail(c, user);
+}
+route('PUT', '/v1/content/:id/tags', async ({ auth, params, body }) => {
+  const c = contentOrThrow(params.id, auth.user, { edit: true });
+  validate(
+    Array.isArray(body.tags) &&
+      body.tags.length <= 4 &&
+      body.tags.every((t) => EVENT_TAGS.includes(t)) &&
+      new Set(body.tags).size === body.tags.length,
+    'tags',
+  );
+  db.tags.set(c.id, [...body.tags]);
+  bumpContentEpoch(c);
+  return detailWithM1b(c, auth.user);
+});
+function pinTargetOrThrow(c, user, streamId) {
+  if (streamId === null) {
+    if (!['owner', 'admin', 'announcer'].includes(user.role)) {
+      throw new HttpError(403, 'pin_forbidden', 'org-wide pins need owner/admin/announcer');
+    }
+    return 'org';
+  }
+  validate(UUID_RE.test(streamId), 'streamId');
+  const s = db.streams.get(streamId);
+  if (!s || s.orgId !== user.orgId) throw new HttpError(404, 'not_found', 'no such stream');
+  const role = streamRoleFor(s, user);
+  const allowed =
+    role === 'moderator' || role === 'owner' || user.role === 'owner' || user.role === 'admin';
+  if (!allowed) throw new HttpError(403, 'pin_forbidden', 'stream pins need moderator/owner');
+  if (!c.audience.some((a) => a.type === 'stream' && a.streamId === streamId)) {
+    throw new HttpError(409, 'not_in_audience', 'item is not addressed to that stream');
+  }
+  return streamId;
+}
+route('POST', '/v1/content/:id/pin', async ({ auth, params, body }) => {
+  const c = db.content.get(params.id);
+  if (!c || c.orgId !== auth.user.orgId) throw new HttpError(404, 'content_not_found', 'no such');
+  if (c.state !== 'published') throw new HttpError(409, 'not_published', 'not published');
+  const target = pinTargetOrThrow(c, auth.user, body.streamId ?? null);
+  db.pins.set(`${c.id}:${target}`, true);
+  bumpContentEpoch(c);
+  return detailWithM1b(c, auth.user);
+});
+route('DELETE', '/v1/content/:id/pin', async ({ auth, params, url }) => {
+  const c = db.content.get(params.id);
+  if (!c || c.orgId !== auth.user.orgId) throw new HttpError(404, 'content_not_found', 'no such');
+  const streamId = url.searchParams.get('streamId');
+  const target = pinTargetOrThrow(c, auth.user, streamId);
+  db.pins.delete(`${c.id}:${target}`);
+  bumpContentEpoch(c);
+  return detailWithM1b(c, auth.user);
+});
+
+// org and stream settings, preferences
+route('GET', '/v1/org/settings', async ({ auth }) => orgSettingsFor(auth.user.orgId));
+route('PATCH', '/v1/org/settings', async ({ auth, body }) => {
+  if (auth.user.role !== 'owner' && auth.user.role !== 'admin') {
+    throw new HttpError(403, 'forbidden', 'owner or admin only');
+  }
+  const s = orgSettingsFor(auth.user.orgId);
+  if (body.privacyMode !== undefined) {
+    validate(
+      ['aggregate_only', 'named', 'identified_for_required_only'].includes(body.privacyMode),
+      'privacyMode',
+    );
+    s.privacyMode = body.privacyMode;
+  }
+  if (body.commentsEnabled !== undefined) {
+    validate(typeof body.commentsEnabled === 'boolean', 'commentsEnabled');
+    s.commentsEnabled = body.commentsEnabled;
+  }
+  if (body.engagementRetentionDays !== undefined) {
+    validate(
+      Number.isInteger(body.engagementRetentionDays) &&
+        body.engagementRetentionDays >= 30 &&
+        body.engagementRetentionDays <= 3650,
+      'engagementRetentionDays',
+    );
+    s.engagementRetentionDays = body.engagementRetentionDays;
+  }
+  if (body.commentScanPolicy !== undefined) {
+    validate(['off', 'warn', 'block'].includes(body.commentScanPolicy), 'commentScanPolicy');
+    s.commentScanPolicy = body.commentScanPolicy;
+  }
+  return s;
+});
+route('PATCH', '/v1/streams/:id', async ({ auth, params, body }) => {
+  const s = streamOrThrow(params.id, auth.user);
+  const role = streamRoleFor(s, auth.user);
+  const allowed =
+    role === 'moderator' ||
+    role === 'owner' ||
+    auth.user.role === 'owner' ||
+    auth.user.role === 'admin';
+  if (!allowed) throw new HttpError(403, 'forbidden', 'moderator or owner only');
+  if (body.commentsEnabled !== undefined) {
+    validate(typeof body.commentsEnabled === 'boolean', 'commentsEnabled');
+    db.streamSettings.set(s.id, { commentsEnabled: body.commentsEnabled });
+  }
+  return {
+    ...streamView(s, auth.user),
+    commentsEnabled: db.streamSettings.get(s.id)?.commentsEnabled ?? true,
+  };
+});
+route(
+  'GET',
+  '/v1/me/preferences',
+  async ({ auth }) => db.preferences.get(auth.user.id) ?? { emailDigest: 'daily' },
+);
+route('PATCH', '/v1/me/preferences', async ({ auth, body }) => {
+  const current = db.preferences.get(auth.user.id) ?? { emailDigest: 'daily' };
+  if (body.emailDigest !== undefined) {
+    validate(['daily', 'off'].includes(body.emailDigest), 'emailDigest');
+    current.emailDigest = body.emailDigest;
+  }
+  db.preferences.set(auth.user.id, current);
+  return current;
 });
 
 // test hooks (mock only)

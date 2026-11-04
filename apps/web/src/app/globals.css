@@ -504,6 +504,113 @@ button.danger {
   min-height: 24px;
 }
 
+/* Reactions (M1b) */
+.reaction-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+  margin: 0.25rem 0 0.4rem;
+}
+.reaction {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  border-color: #8a8d85;
+  padding: 0.3rem 0.7rem;
+  min-height: 24px;
+}
+.reaction.pressed,
+.reaction[aria-pressed='true'] {
+  background: #bfe9dc;
+  color: #0b1a16;
+  border-color: #bfe9dc;
+}
+.reaction .count {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.9;
+}
+.chip.pinned {
+  background: #ffe6b3;
+  color: #2b1d00;
+  border-color: #ffe6b3;
+}
+
+/* Comments drawer: a sibling of the snap container, never inside .feed-meta */
+.comments-drawer {
+  background: var(--color-surface);
+  color: var(--color-text);
+  border-top: 1px solid var(--color-border);
+  max-height: 55%;
+  overflow-y: auto;
+  padding: var(--space-1) var(--space-2) var(--space-2);
+}
+.page .comments-drawer {
+  max-height: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  margin-top: var(--space-3);
+}
+.comments-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-2);
+}
+.comments-head h2 {
+  margin: 0.25rem 0;
+  font-size: 1.1rem;
+}
+.comment-form textarea {
+  width: 100%;
+  resize: vertical;
+}
+.comment-list,
+.comment-replies {
+  list-style: none;
+  padding: 0;
+  margin: var(--space-1) 0 0;
+}
+.comment-replies {
+  margin-left: var(--space-3);
+  border-left: 2px solid var(--color-border);
+  padding-left: var(--space-2);
+}
+.comment {
+  padding: var(--space-1) 0;
+  border-top: 1px solid var(--color-border);
+}
+.comment:focus-visible {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 2px;
+}
+.comment-head {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+.comment-body {
+  margin: 0.25rem 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.comment-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.comment-actions button {
+  min-height: 2rem;
+  padding: 0.2rem 0.6rem;
+}
+.comment.removed {
+  font-style: italic;
+}
+.comments-page-note {
+  font-size: 0.85rem;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
