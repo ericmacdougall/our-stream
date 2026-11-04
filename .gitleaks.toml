@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# gitleaks configuration: extend the default rules; allow-list reviewed false positives by exact fingerprint.
+title = "our-stream gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Reviewed false positives (fingerprint = commit:file:rule:line)"
+# A test constant holding a UUID used as a media key id (not a credential). The identifier was
+# renamed in the tree; the historical commit cannot be rewritten without a force-push.
+fingerprints = [
+  "406052c6852896e03956620c11b0065ca5f219cd:apps/api/src/lib/lib.test.ts:generic-api-key:21",
+]

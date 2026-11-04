@@ -18,7 +18,7 @@ const ORG = '0d2a2b1e-1b7e-4b2a-9d31-5f0c1d8e9a11';
 const USER = '1d2a2b1e-1b7e-4b2a-9d31-5f0c1d8e9a22';
 const CONTENT = '2d2a2b1e-1b7e-4b2a-9d31-5f0c1d8e9a33';
 const VERSION = '3d2a2b1e-1b7e-4b2a-9d31-5f0c1d8e9a44';
-const KEY = '4d2a2b1e-1b7e-4b2a-9d31-5f0c1d8e9a55';
+const MEDIA_KEY_ID = '4d2a2b1e-1b7e-4b2a-9d31-5f0c1d8e9a55';
 const SECRET = 'unit-test-secret-0123456789abcdefghijklmnop';
 
 describe('config', () => {
@@ -62,17 +62,17 @@ describe('tokens', () => {
       userId: USER,
       orgId: ORG,
       versionId: VERSION,
-      mediaKeyId: KEY,
+      mediaKeyId: MEDIA_KEY_ID,
       exp,
     });
     const parsed = parseMediaToken(token)!;
     expect(parsed).toMatchObject({ userId: USER, orgId: ORG, exp });
-    expect(mediaTokenValid(SECRET, parsed, VERSION, KEY, exp - 10)).toBe(true);
-    expect(mediaTokenValid(SECRET, parsed, VERSION, KEY, exp)).toBe(false); // expired
-    expect(mediaTokenValid(SECRET, parsed, CONTENT, KEY, exp - 10)).toBe(false); // other version
+    expect(mediaTokenValid(SECRET, parsed, VERSION, MEDIA_KEY_ID, exp - 10)).toBe(true);
+    expect(mediaTokenValid(SECRET, parsed, VERSION, MEDIA_KEY_ID, exp)).toBe(false); // expired
+    expect(mediaTokenValid(SECRET, parsed, CONTENT, MEDIA_KEY_ID, exp - 10)).toBe(false); // other version
     expect(mediaTokenValid(SECRET, parsed, VERSION, ORG, exp - 10)).toBe(false); // rotated key
-    expect(mediaTokenValid(SECRET, { ...parsed, userId: ORG }, VERSION, KEY, exp - 10)).toBe(false);
-    expect(mediaTokenValid('x'.repeat(40), parsed, VERSION, KEY, exp - 10)).toBe(false);
+    expect(mediaTokenValid(SECRET, { ...parsed, userId: ORG }, VERSION, MEDIA_KEY_ID, exp - 10)).toBe(false);
+    expect(mediaTokenValid('x'.repeat(40), parsed, VERSION, MEDIA_KEY_ID, exp - 10)).toBe(false);
     expect(parseMediaToken('v1.not-a-uuid.1.sig')).toBeNull();
     expect(parseMediaToken(token.replace('v1.', 'v2.'))).toBeNull();
   });
