@@ -16,6 +16,9 @@ COPY packages/config packages/config
 COPY packages/contracts packages/contracts
 COPY apps/web apps/web
 ENV NEXT_TELEMETRY_DISABLED=1
+# /api and /media rewrites are fixed at build time (next.config.ts); default matches compose.
+ARG API_INTERNAL_URL=http://api:4000
+ENV API_INTERNAL_URL=${API_INTERNAL_URL}
 RUN pnpm --filter @our-stream/contracts build && pnpm --filter @our-stream/web build
 
 FROM node:24-bookworm-slim AS runtime

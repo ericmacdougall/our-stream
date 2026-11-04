@@ -14,6 +14,11 @@ const skipDirs = new Set([
   'coverage',
   '.git',
   'generated',
+  // Playwright artifacts and ffmpeg-generated media fixtures (all git-ignored).
+  'test-results',
+  'playwright-report',
+  'blob-report',
+  '.fixtures',
 ]);
 const exts = new Set(['.ts', '.tsx', '.js', '.mjs', '.cjs', '.sql', '.yml', '.yaml', '.css']);
 const skipFiles = new Set(['pnpm-lock.yaml', 'pnpm-workspace.yaml', 'next-env.d.ts']);

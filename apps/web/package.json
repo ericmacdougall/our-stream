@@ -5,23 +5,34 @@
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
-    "build": "next build",
-    "dev": "next dev",
+    "build": "node scripts/build-sw.mjs && next build",
+    "dev": "node scripts/build-sw.mjs && next dev",
     "start": "next start",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "mock-api": "node test/mock-api/server.mjs",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@formatjs/intl": "6.1.4",
     "@our-stream/contracts": "workspace:*",
+    "@uppy/aws-s3": "5.1.0",
+    "@uppy/core": "5.2.0",
+    "hls.js": "1.7.4",
     "next": "16.4.5",
     "react": "19.3.1",
-    "react-dom": "19.3.1"
+    "react-dom": "19.3.1",
+    "server-only": "0.0.1",
+    "serwist": "9.5.13",
+    "zod": "4.6.7"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
+    "@playwright/test": "1.64.1",
     "@types/node": "24.19.2",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
+    "esbuild": "0.28.2",
     "typescript": "5.9.3",
     "vitest": "5.1.0"
   }

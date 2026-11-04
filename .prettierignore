@@ -7,3 +7,9 @@ dist
 coverage
 packages/contracts/openapi.json
 LICENSE
+test-results
+playwright-report
+blob-report
+.fixtures
+apps/web/public/sw.js
+apps/web/next-env.d.ts
