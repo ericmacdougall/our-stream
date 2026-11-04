@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
-import { browserApi } from '@/lib/api/client';
+import { browserApi, errorCode } from '@/lib/api/client';
 import { clearAllCaches } from '@/lib/caches';
 import { errorMessage } from '@/lib/errors';
 import { t } from '@/lib/i18n';
@@ -49,15 +49,20 @@ export function NavBar() {
     // Navigate only when the server really ended the session: /sign-in now bounces a still-valid
     // session straight back to the feed, which on a shared machine would look like a sign-out.
     let ended: boolean;
+    let csrfRefused = false;
     try {
       const result = await browserApi().POST('/v1/auth/logout');
       ended = result.response.status === 401 || errorMessage(result) === null;
+      csrfRefused = !ended && errorCode(result.error) === 'csrf';
     } catch {
       ended = false;
     }
     if (!ended) {
       setSignOutFailed(true);
       setSigningOut(false);
+      // A refused CSRF token (rotated in another tab) is recovered by re-rendering the layout, which
+      // hands SessionProvider the current token for the next attempt.
+      if (csrfRefused) router.refresh();
       return;
     }
     await clearAllCaches();

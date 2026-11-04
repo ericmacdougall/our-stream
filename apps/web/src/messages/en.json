@@ -21,7 +21,7 @@
   "nav.account": "Account",
   "nav.unread": "{count, plural, one {unread} other {unread}}",
   "nav.signOut": "Sign out",
-  "nav.signOutFailed": "Sign-out did not reach the server; you are still signed in. Try again.",
+  "nav.signOutFailed": "Sign-out failed; you are still signed in. Try again.",
 
   "auth.signIn.title": "Sign in",
   "auth.signIn.submit": "Sign in",

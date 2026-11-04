@@ -735,6 +735,7 @@ route('POST', '/v1/notifications/:id/read', async ({ auth, params }) => {
 // test hooks (mock only)
 route('POST', '/__mock/reset', async () => {
   for (const m of Object.values(db)) m.clear();
+  dropNextPasswordResponse = false;
   return { ok: true };
 });
 // Creates a password-less member of an existing org (what POST /v1/invites does on the real API) and
@@ -775,6 +776,7 @@ route('POST', '/__mock/drop-next-response', async () => {
   return { ok: true };
 });
 route('GET', '/__mock/state', async () => ({
+  dropNextPasswordResponse,
   users: db.users.size,
   content: db.content.size,
   sessions: db.sessions.size,
