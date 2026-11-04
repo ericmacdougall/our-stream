@@ -64,6 +64,16 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     bodyLimit: 1024 * 1024,
   }).withTypeProvider<ZodTypeProvider>();
 
+  // Body-less mutations (retract, read, logout) are commonly sent with a JSON content type and an
+  // empty body; treat an empty JSON body as {} instead of rejecting the request.
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => {
+    if (typeof body !== 'string' || body.trim() === '') return done(null, {});
+    try {
+      done(null, JSON.parse(body));
+    } catch (err) {
+      done(Object.assign(err as Error, { statusCode: 400 }), undefined);
+    }
+  });
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
 

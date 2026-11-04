@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { ensureBossSchema } from './boss-bootstrap.js';
 import { PgBoss, type Job } from 'pg-boss';
 import pino from 'pino';
 import { createPool } from '@our-stream/db';
@@ -28,7 +29,16 @@ const asr = selectProvider(policy, [createAsrProviderFromEnv()], 'asr');
 const limits = limitsFromEnv();
 const store = createObjectStore(s3ConfigFromEnv());
 
-const boss = new PgBoss({ connectionString: platformUrl, schema: 'pgboss' });
+const bossSchema = 'pgboss';
+// Install pg-boss objects as the schema-owning platform role (no CREATE on the database), then start
+// with migrate: false so pg-boss never issues CREATE SCHEMA itself.
+{
+  const bootstrapPool = createPool(platformUrl, { max: 1 });
+  const outcome = await ensureBossSchema(bootstrapPool, bossSchema);
+  await bootstrapPool.end();
+  log.info({ outcome }, 'pg-boss schema bootstrap');
+}
+const boss = new PgBoss({ connectionString: platformUrl, schema: bossSchema, migrate: false });
 boss.on('error', (err: Error) => log.error({ err }, 'pg-boss error'));
 await boss.start();
 
