@@ -1,0 +1,32 @@
+our-stream {{ .Chart.AppVersion }} (chart {{ .Chart.Version }}) rendered for release {{ .Release.Name }}.
+
+Web origin:     {{ .Values.appBaseUrl }}
+API Service:    {{ include "our-stream.apiServiceName" . }}:{{ .Values.api.service.port }}
+Browser traffic to /api and /media is routed to the api at the Ingress{{ if .Values.gatewayApi.enabled }}/HTTPRoute{{ end }}; the web image's
+own rewrites (fixed at build time, default http://api:4000) only matter for `next dev` or if you route
+everything to web. Build web with --build-arg API_INTERNAL_URL=http://{{ include "our-stream.apiServiceName" . }}:{{ .Values.api.service.port }} to keep them valid.
+
+Secrets referenced (create them before installing):
+  {{ .Values.secrets.app.existingSecret }}      keys DATABASE_URL, DATABASE_PLATFORM_URL, S3_ACCESS_KEY, S3_SECRET_KEY, SESSION_SECRET, MEDIA_HMAC_SECRET[, SMTP_URL]
+  {{ .Values.secrets.migrate.existingSecret }}  key {{ .Values.secrets.migrate.key }} (migrate Job only)
+{{- if .Values.postgresql.cloudnativepg.enabled }}
+  {{ .Values.postgresql.cloudnativepg.ownerSecret }}, {{ .Values.postgresql.cloudnativepg.appRoleSecret }}, {{ .Values.postgresql.cloudnativepg.platformRoleSecret }}  (basic-auth: username, password)
+{{- end }}
+{{- if .Values.devStorage.enabled }}
+  {{ .Values.devStorage.existingSecret }}  key s3.json
+{{- end }}
+
+TRUST_PROXY: {{ include "our-stream.trustProxy" . }}
+{{- if not .Values.api.trustedProxyCidrs }}
+WARNING: api.trustedProxyCidrs is empty, so every request reaches the api from the ingress controller's
+address and the per-address sign-in budget is shared by all users (docs/deployment.md "Trust chain"). Set it
+to the address range of the ingress controller pods and keep networkPolicy.enabled=true.
+{{- end }}
+{{- if or (gt (int .Values.api.replicaCount) 1) .Values.api.autoscaling.enabled }}
+WARNING: more than one api replica multiplies the per-process rate budgets (AUTH_RATE_LIMIT_MAX x replicas)
+until a shared store exists (ADR-0004).
+{{- end }}
+{{- if not .Values.networkPolicy.enabled }}
+WARNING: networkPolicy.enabled=false: web and api accept traffic from any pod, so a pod in the cluster can
+send a forged X-Forwarded-For straight to them.
+{{- end }}

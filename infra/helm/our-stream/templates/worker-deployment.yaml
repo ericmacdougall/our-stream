@@ -1,0 +1,95 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "our-stream.fullname" . }}-worker
+  labels:
+    {{- include "our-stream.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ .Values.worker.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "our-stream.selectorLabels" (dict "root" . "component" "worker") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "our-stream.selectorLabels" (dict "root" . "component" "worker") | nindent 8 }}
+      {{- with .Values.worker.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "our-stream.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      # Media jobs run for minutes; let an in-flight ffmpeg finish before the pod is killed (pg-boss retries
+      # anything that does not complete).
+      terminationGracePeriodSeconds: 600
+      containers:
+        - name: worker
+          image: {{ include "our-stream.image" (dict "root" . "component" "worker") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          env:
+            - name: NODE_ENV
+              value: production
+            {{- include "our-stream.objectStorageEnv" . | nindent 12 }}
+            - name: ASR_PROVIDER
+              value: {{ .Values.worker.asr.provider | quote }}
+            {{- if .Values.worker.asr.whisperUrl }}
+            - name: WHISPER_URL
+              value: {{ .Values.worker.asr.whisperUrl | quote }}
+            {{- end }}
+            - name: PROVIDER_SELF_HOST_ONLY
+              value: {{ .Values.worker.providerPolicy.selfHostOnly | toString | quote }}
+            - name: PROVIDER_REQUIRE_ZDR
+              value: {{ .Values.worker.providerPolicy.requireZdr | toString | quote }}
+            - name: FFMPEG_THREADS
+              value: {{ .Values.worker.ffmpegThreads | toString | quote }}
+            - name: MEDIA_MAX_INPUT_BYTES
+              value: {{ .Values.worker.mediaMaxInputBytes | toString | quote }}
+            - name: MEDIA_CONCURRENCY
+              value: {{ .Values.worker.mediaConcurrency | toString | quote }}
+            - name: WORKER_TMP_DIR
+              value: /var/tmp/ourstream
+            - name: LOG_LEVEL
+              value: {{ .Values.worker.logLevel | quote }}
+            {{- include "our-stream.extraEnv" .Values.worker.env | nindent 12 }}
+            # Tenant and platform roles plus object storage credentials; no session secrets, no admin URL.
+            {{- include "our-stream.secretEnv" (dict "secret" .Values.secrets.app.existingSecret "keys" (list "DATABASE_URL" "DATABASE_PLATFORM_URL" "S3_ACCESS_KEY" "S3_SECRET_KEY") "optional" (list)) | nindent 12 }}
+          # No HTTP probe: the worker exposes no health endpoint yet (pg-boss supervises job retries).
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: scratch
+              mountPath: /var/tmp/ourstream
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 1Gi }
+        - name: scratch
+          emptyDir:
+            sizeLimit: {{ include "our-stream.scratchSizeLimit" . }}
+            {{- if .Values.worker.scratch.medium }}
+            medium: {{ .Values.worker.scratch.medium }}
+            {{- end }}
+      {{- with .Values.worker.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.worker.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.worker.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

@@ -1,0 +1,94 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+{{- if .Values.devStorage.enabled }}
+{{- $ds := .Values.devStorage }}
+# Evaluation-only object storage: one SeaweedFS pod with its S3 gateway, as in compose. No replication, no
+# backups; point objectStorage.endpoint at an Ingress or port-forward that browsers can reach.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "our-stream.fullname" . }}-dev-storage
+  labels:
+    {{- include "our-stream.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dev-storage
+spec:
+  type: ClusterIP
+  ports:
+    - name: s3
+      port: 8333
+      targetPort: s3
+      protocol: TCP
+  selector:
+    {{- include "our-stream.selectorLabels" (dict "root" . "component" "dev-storage") | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "our-stream.fullname" . }}-dev-storage
+  labels:
+    {{- include "our-stream.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dev-storage
+spec:
+  serviceName: {{ include "our-stream.fullname" . }}-dev-storage
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "our-stream.selectorLabels" (dict "root" . "component" "dev-storage") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "our-stream.selectorLabels" (dict "root" . "component" "dev-storage") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "our-stream.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: seaweedfs
+          image: {{ $ds.image | quote }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          args:
+            - server
+            - -s3
+            - -s3.port=8333
+            - -dir=/data
+            - -master.volumeSizeLimitMB=1024
+            - -s3.config=/etc/seaweedfs/s3.json
+          ports:
+            - name: s3
+              containerPort: 8333
+              protocol: TCP
+          readinessProbe:
+            tcpSocket: { port: s3 }
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: { port: s3 }
+            periodSeconds: 30
+          resources:
+            {{- toYaml $ds.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: s3-config
+              mountPath: /etc/seaweedfs
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: s3-config
+          secret:
+            secretName: {{ $ds.existingSecret }}
+        - name: tmp
+          emptyDir: { sizeLimit: 256Mi }
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        {{- with $ds.storage.storageClass }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $ds.storage.size }}
+{{- end }}

@@ -1,0 +1,80 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+{{- if .Values.ingress.enabled }}
+# Same shape as the compose edge: /media/* and /api/* go to the api, everything else to web, so the web
+# pods (whose Next.js rewrites forward X-Forwarded-For unchanged) are never on the path the api trusts.
+# Plain Ingress cannot strip the /api prefix, so that route lives in a second Ingress whose annotations
+# default to ingress-nginx's rewrite; override `ingress.api` for other controllers or use gatewayApi.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "our-stream.fullname" . }}
+  labels:
+    {{- include "our-stream.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          - path: /media
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "our-stream.apiServiceName" $ }}
+                port:
+                  name: http
+          {{- range .paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType }}
+            backend:
+              service:
+                name: {{ include "our-stream.fullname" $ }}-web
+                port:
+                  name: http
+          {{- end }}
+    {{- end }}
+{{- if .Values.ingress.api.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "our-stream.fullname" . }}-api
+  labels:
+    {{- include "our-stream.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+  annotations:
+    {{- toYaml (merge (dict) .Values.ingress.api.annotations .Values.ingress.annotations) | nindent 4 }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          - path: {{ $.Values.ingress.api.path }}
+            pathType: {{ $.Values.ingress.api.pathType }}
+            backend:
+              service:
+                name: {{ include "our-stream.apiServiceName" $ }}
+                port:
+                  name: http
+    {{- end }}
+{{- end }}
+{{- end }}

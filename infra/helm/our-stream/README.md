@@ -1,0 +1,55 @@
+# our-stream Helm chart
+
+Deploys the our-stream platform (api, web, worker) with a schema-migration Job, Ingress or Gateway API
+routing, NetworkPolicy, and optional in-cluster Postgres (CloudNativePG) and object storage (SeaweedFS) for
+evaluation clusters. `docs/deployment.md` in the repository explains the client-address trust chain, the
+secrets contract and what the chart does not do.
+
+```sh
+helm lint infra/helm/our-stream
+helm template our-stream infra/helm/our-stream -f my-values.yaml
+helm upgrade --install our-stream infra/helm/our-stream -n our-stream --create-namespace -f my-values.yaml
+bash infra/helm/our-stream/ci/check.sh   # lint + template + kubeconform + invariants, same as CI
+```
+
+## Values
+
+| Key                                                                                                   | Default                                            | Meaning                                                                                                                                    |
+| ----------------------------------------------------------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `image.registry`, `image.repository`, `image.tag`                                                     | `ghcr.io`, `ericmacdougall/our-stream`, appVersion | Images are `<registry>/<repository>-{api,web,worker}:<tag>`; no public images are published yet, push your own                             |
+| `appBaseUrl`                                                                                          | `https://stream.example.com`                       | Public origin (`APP_BASE_URL`); must be https in production                                                                                |
+| `secrets.app.existingSecret`                                                                          | `our-stream-app`                                   | Keys `DATABASE_URL`, `DATABASE_PLATFORM_URL`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `SESSION_SECRET`, `MEDIA_HMAC_SECRET`, optional `SMTP_URL` |
+| `secrets.migrate.existingSecret`, `secrets.migrate.key`                                               | `our-stream-migrate`, `DATABASE_ADMIN_URL`         | Admin connection string, read by the migrate Job only                                                                                      |
+| `objectStorage.endpoint/region/bucket/forcePathStyle`                                                 | example S3                                         | Must be reachable by browsers (direct multipart upload) and pods                                                                           |
+| `objectStorage.corsOrigins`                                                                           | `[]` (= `appBaseUrl`)                              | `S3_CORS_ORIGINS`                                                                                                                          |
+| `mail.from`                                                                                           | example                                            | `MAIL_FROM`                                                                                                                                |
+| `api.replicaCount`                                                                                    | `1`                                                | More than one multiplies per-process rate budgets (ADR-0004); the chart warns                                                              |
+| `api.trustedProxyCidrs`                                                                               | `[]` (renders `TRUST_PROXY=false`)                 | CIDRs of the ingress controller pods; `true`, `/0` and prefixes broader than /8 (v4) or /16 (v6) are refused                               |
+| `api.logLevel`, `api.env`                                                                             | `info`, `{}`                                       | Extra non-secret env; credential names are refused by the schema                                                                           |
+| `api.service.name`, `api.service.port`                                                                | `<release>-our-stream-api`, `4000`                 | Set the name to `api` to match the web image's build-time rewrite target                                                                   |
+| `api.autoscaling`, `web.autoscaling`                                                                  | off                                                | CPU HPAs                                                                                                                                   |
+| `web.replicaCount`                                                                                    | `2`                                                |                                                                                                                                            |
+| `worker.replicaCount`                                                                                 | `1`                                                |                                                                                                                                            |
+| `worker.asr.provider`, `worker.asr.whisperUrl`                                                        | `fake`, `''`                                       | `fake` or `whisper-http` (ADR-0008)                                                                                                        |
+| `worker.providerPolicy.selfHostOnly/requireZdr`                                                       | `true`, `true`                                     | Deployment-wide provider policy (ADR-0008)                                                                                                 |
+| `worker.ffmpegThreads`, `worker.mediaMaxInputBytes`, `worker.mediaConcurrency`                        | `4`, 4 GiB, `2`                                    |                                                                                                                                            |
+| `worker.scratch.sizeLimit`, `worker.scratch.medium`                                                   | `16Gi`, `''`                                       | emptyDir for `WORKER_TMP_DIR`; must be at least 2 x `mediaMaxInputBytes` (template refuses less)                                           |
+| `migrate.backoffLimit`, `migrate.activeDeadlineSeconds`, `migrate.waitForDatabaseSeconds`             | `1`, `900`, `300`                                  | Hook Job settings                                                                                                                          |
+| `ingress.enabled`, `ingress.className`, `ingress.annotations`, `ingress.hosts`, `ingress.tls`         | one host                                           | `/media` to the api, `hosts[].paths` to web                                                                                                |
+| `ingress.api.*`                                                                                       | ingress-nginx regex rewrite                        | Second Ingress that strips `/api`; override for other controllers                                                                          |
+| `gatewayApi.enabled`, `gatewayApi.parentRefs`                                                         | off                                                | `HTTPRoute` with a standard `URLRewrite` instead of the Ingress pair                                                                       |
+| `networkPolicy.enabled`, `networkPolicy.ingressNamespaceSelector`, `networkPolicy.ingressPodSelector` | on, `{}`                                           | Default-deny ingress for the release; web and api from the ingress controller, api also from web                                           |
+| `podSecurityContext`, `containerSecurityContext`                                                      | non-root, read-only, drop ALL                      | Schema requires `runAsNonRoot: true` and `allowPrivilegeEscalation: false`                                                                 |
+| `serviceAccount.*`                                                                                    | created, no token mount                            |                                                                                                                                            |
+| `postgresql.cloudnativepg.*`                                                                          | off                                                | CloudNativePG `Cluster` with the three roles; needs the operator and a pgvector-capable image                                              |
+| `devStorage.*`                                                                                        | off                                                | Single-pod SeaweedFS with its S3 gateway; evaluation only                                                                                  |
+| `resources`, `nodeSelector`, `tolerations`, `affinity`, `podAnnotations` per component                | sensible defaults                                  |                                                                                                                                            |
+
+## Invariants checked by `ci/check.sh`
+
+Expected resource counts per kind for the default and all-options renderings; every pod `runAsNonRoot`
+with `allowPrivilegeEscalation: false` and `capabilities.drop: [ALL]`; no `privileged`, `hostNetwork`,
+`hostPID`, `hostIPC` or `envFrom`; `DATABASE_ADMIN_URL` only in the migrate Job; `TRUST_PROXY` is `false`
+or a CIDR list; no development default secret from `apps/api/src/config.ts` or the compose file appears in
+a rendering; `Chart.yaml` `appVersion` equals the root `package.json` version. Each has a failing control
+in the script.

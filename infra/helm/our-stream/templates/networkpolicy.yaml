@@ -1,0 +1,99 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+{{- if .Values.networkPolicy.enabled }}
+# Skeleton: default-deny ingress for the pods of this release (selected by the chart's own labels, so
+# operator-owned pods such as CloudNativePG instances are untouched), then the allowed hops: web and api
+# from the ingress controller, api additionally from web (its rewrites, used by `next dev` and SSR). The
+# CNI must enforce NetworkPolicy for this to hold (kindnet and plain flannel do not). Egress is left open
+# (external Postgres, object storage, SMTP, ASR sidecars); tighten it per cluster.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "our-stream.fullname" . }}-default-deny
+  labels:
+    {{- include "our-stream.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "our-stream.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes: [Ingress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "our-stream.fullname" . }}-web-from-ingress
+  labels:
+    {{- include "our-stream.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "our-stream.selectorLabels" (dict "root" . "component" "web") | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.ingressNamespaceSelector | nindent 14 }}
+          {{- with .Values.networkPolicy.ingressPodSelector }}
+          podSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+          {{- end }}
+      ports:
+        - port: 3000
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "our-stream.fullname" . }}-api-from-ingress-and-web
+  labels:
+    {{- include "our-stream.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "our-stream.selectorLabels" (dict "root" . "component" "api") | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.ingressNamespaceSelector | nindent 14 }}
+          {{- with .Values.networkPolicy.ingressPodSelector }}
+          podSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+          {{- end }}
+        - podSelector:
+            matchLabels:
+              {{- include "our-stream.selectorLabels" (dict "root" . "component" "web") | nindent 14 }}
+      ports:
+        - port: 4000
+          protocol: TCP
+{{- if .Values.devStorage.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "our-stream.fullname" . }}-dev-storage
+  labels:
+    {{- include "our-stream.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "our-stream.selectorLabels" (dict "root" . "component" "dev-storage") | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "our-stream.name" . }}
+              app.kubernetes.io/instance: {{ .Release.Name }}
+        - namespaceSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.ingressNamespaceSelector | nindent 14 }}
+      ports:
+        - port: 8333
+          protocol: TCP
+{{- end }}
+{{- end }}
