@@ -1,0 +1,523 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "our-stream chart values",
+  "type": "object",
+  "$defs": {
+    "cidr": {
+      "type": "string",
+      "pattern": "^([0-9]{1,3}\\.){3}[0-9]{1,3}/([89]|[12][0-9]|3[0-2])$|^[0-9A-Fa-f:]+/(1[6-9]|[2-9][0-9]|1[01][0-9]|12[0-8])$",
+      "description": "An IPv4 (/8 to /32) or IPv6 (/16 to /128) CIDR. `true`, `uniquelocal`, bare addresses, /0 and IPv4-mapped IPv6 ranges (::ffff:0:0/96) are rejected on purpose.",
+      "not": {
+        "pattern": "^(?i:::ffff:)"
+      }
+    },
+    "secretName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 253,
+      "pattern": "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+    },
+    "resources": {
+      "type": "object"
+    },
+    "scalable": {
+      "type": "object",
+      "properties": {
+        "replicaCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "autoscaling": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "minReplicas": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "maxReplicas": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "targetCPUUtilizationPercentage": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          "required": ["enabled", "minReplicas", "maxReplicas", "targetCPUUtilizationPercentage"]
+        },
+        "resources": {
+          "$ref": "#/$defs/resources"
+        }
+      },
+      "required": ["replicaCount", "autoscaling"]
+    }
+  },
+  "properties": {
+    "appBaseUrl": {
+      "type": "string",
+      "pattern": "^https?://[^/]+$"
+    },
+    "image": {
+      "type": "object",
+      "properties": {
+        "registry": {
+          "type": "string",
+          "minLength": 1
+        },
+        "repository": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tag": {
+          "type": "string"
+        },
+        "pullPolicy": {
+          "type": "string",
+          "enum": ["Always", "IfNotPresent", "Never"]
+        }
+      },
+      "required": ["registry", "repository", "pullPolicy"]
+    },
+    "secrets": {
+      "type": "object",
+      "properties": {
+        "app": {
+          "type": "object",
+          "properties": {
+            "existingSecret": {
+              "$ref": "#/$defs/secretName"
+            }
+          },
+          "required": ["existingSecret"],
+          "additionalProperties": false
+        },
+        "migrate": {
+          "type": "object",
+          "properties": {
+            "existingSecret": {
+              "$ref": "#/$defs/secretName"
+            },
+            "key": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": ["existingSecret", "key"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["app", "migrate"],
+      "additionalProperties": false
+    },
+    "objectStorage": {
+      "type": "object",
+      "properties": {
+        "endpoint": {
+          "type": "string",
+          "pattern": "^https?://"
+        },
+        "region": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bucket": {
+          "type": "string",
+          "minLength": 1
+        },
+        "forcePathStyle": {
+          "type": "boolean"
+        },
+        "corsOrigins": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^https?://[^/]+$"
+          }
+        },
+        "publicEndpoint": {
+          "type": "string",
+          "pattern": "^$|^https?://"
+        }
+      },
+      "required": ["endpoint", "region", "bucket", "forcePathStyle"]
+    },
+    "api": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/scalable"
+        }
+      ],
+      "properties": {
+        "trustedProxyCidrs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/cidr"
+          }
+        },
+        "logLevel": {
+          "type": "string",
+          "enum": ["trace", "debug", "info", "warn", "error"]
+        },
+        "env": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[A-Z][A-Z0-9_]*$",
+            "not": {
+              "enum": [
+                "DATABASE_URL",
+                "DATABASE_PLATFORM_URL",
+                "DATABASE_ADMIN_URL",
+                "S3_ACCESS_KEY",
+                "S3_SECRET_KEY",
+                "SESSION_SECRET",
+                "MEDIA_HMAC_SECRET",
+                "SMTP_URL",
+                "TRUST_PROXY",
+                "NODE_ENV",
+                "HOST",
+                "PORT",
+                "APP_BASE_URL",
+                "S3_ENDPOINT",
+                "S3_PUBLIC_ENDPOINT",
+                "S3_BUCKET",
+                "S3_REGION",
+                "S3_FORCE_PATH_STYLE",
+                "S3_CORS_ORIGINS",
+                "WORKER_HEALTH_PORT",
+                "WORKER_TMP_DIR"
+              ]
+            }
+          }
+        },
+        "service": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            }
+          },
+          "required": ["port"]
+        }
+      },
+      "required": ["trustedProxyCidrs", "service"]
+    },
+    "web": {
+      "$ref": "#/$defs/scalable"
+    },
+    "worker": {
+      "type": "object",
+      "properties": {
+        "replicaCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "asr": {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "enum": ["fake", "whisper-http"]
+            },
+            "whisperUrl": {
+              "type": "string"
+            }
+          },
+          "required": ["provider"]
+        },
+        "providerPolicy": {
+          "type": "object",
+          "properties": {
+            "selfHostOnly": {
+              "type": "boolean"
+            },
+            "requireZdr": {
+              "type": "boolean"
+            }
+          },
+          "required": ["selfHostOnly", "requireZdr"]
+        },
+        "ffmpegThreads": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "mediaMaxInputBytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "mediaConcurrency": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "scratch": {
+          "type": "object",
+          "properties": {
+            "sizeLimit": {
+              "type": "string",
+              "pattern": "^[0-9]+(\\.[0-9]+)?(Ki|Mi|Gi|Ti|k|M|G|T)?$"
+            },
+            "medium": {
+              "type": "string",
+              "enum": ["", "Memory"]
+            }
+          },
+          "required": ["sizeLimit"]
+        },
+        "env": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[A-Z][A-Z0-9_]*$",
+            "not": {
+              "enum": [
+                "DATABASE_URL",
+                "DATABASE_PLATFORM_URL",
+                "DATABASE_ADMIN_URL",
+                "S3_ACCESS_KEY",
+                "S3_SECRET_KEY",
+                "SESSION_SECRET",
+                "MEDIA_HMAC_SECRET",
+                "SMTP_URL",
+                "TRUST_PROXY",
+                "NODE_ENV",
+                "HOST",
+                "PORT",
+                "APP_BASE_URL",
+                "S3_ENDPOINT",
+                "S3_PUBLIC_ENDPOINT",
+                "S3_BUCKET",
+                "S3_REGION",
+                "S3_FORCE_PATH_STYLE",
+                "S3_CORS_ORIGINS",
+                "WORKER_HEALTH_PORT",
+                "WORKER_TMP_DIR"
+              ]
+            }
+          }
+        }
+      },
+      "required": ["replicaCount", "asr", "providerPolicy", "scratch"]
+    },
+    "migrate": {
+      "type": "object",
+      "properties": {
+        "backoffLimit": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "activeDeadlineSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "waitForDatabaseSeconds": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": ["backoffLimit", "activeDeadlineSeconds", "waitForDatabaseSeconds"]
+    },
+    "ingress": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "className": {
+          "type": "string"
+        },
+        "hosts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "host": {
+                "type": "string",
+                "minLength": 1
+              },
+              "paths": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "pattern": "^/"
+                    },
+                    "pathType": {
+                      "type": "string",
+                      "enum": ["Prefix", "Exact", "ImplementationSpecific"]
+                    }
+                  },
+                  "required": ["path", "pathType"]
+                }
+              }
+            },
+            "required": ["host", "paths"]
+          }
+        },
+        "tls": {
+          "type": "array"
+        },
+        "api": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "path": {
+              "type": "string",
+              "pattern": "^/"
+            },
+            "pathType": {
+              "type": "string",
+              "enum": ["Prefix", "Exact", "ImplementationSpecific"]
+            },
+            "annotations": {
+              "type": "object"
+            }
+          },
+          "required": ["enabled", "path", "pathType", "annotations"]
+        }
+      },
+      "required": ["enabled", "hosts", "api"]
+    },
+    "networkPolicy": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "ingressNamespaceSelector": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "ingressPodSelector": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["enabled"]
+    },
+    "podSecurityContext": {
+      "type": "object",
+      "properties": {
+        "runAsNonRoot": {
+          "const": true
+        }
+      },
+      "required": ["runAsNonRoot"]
+    },
+    "containerSecurityContext": {
+      "type": "object",
+      "properties": {
+        "allowPrivilegeEscalation": {
+          "const": false
+        },
+        "privileged": {
+          "const": false
+        }
+      },
+      "required": ["allowPrivilegeEscalation"]
+    },
+    "postgresql": {
+      "type": "object",
+      "properties": {
+        "cloudnativepg": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "instances": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "imageName": {
+              "type": "string",
+              "minLength": 1
+            },
+            "appRoleSecret": {
+              "$ref": "#/$defs/secretName"
+            },
+            "platformRoleSecret": {
+              "$ref": "#/$defs/secretName"
+            }
+          },
+          "required": ["enabled", "instances", "imageName", "appRoleSecret", "platformRoleSecret"]
+        }
+      },
+      "required": ["cloudnativepg"]
+    },
+    "devStorage": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "image": {
+          "type": "string",
+          "minLength": 1
+        },
+        "existingSecret": {
+          "$ref": "#/$defs/secretName"
+        }
+      },
+      "required": ["enabled", "image", "existingSecret"]
+    },
+    "gatewayApi": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "parentRefs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "namespace": {
+                "type": "string"
+              }
+            },
+            "required": ["name"]
+          }
+        }
+      },
+      "required": ["enabled", "parentRefs"]
+    }
+  },
+  "required": [
+    "appBaseUrl",
+    "image",
+    "secrets",
+    "objectStorage",
+    "api",
+    "web",
+    "worker",
+    "migrate",
+    "ingress",
+    "networkPolicy",
+    "podSecurityContext",
+    "containerSecurityContext",
+    "postgresql",
+    "devStorage",
+    "gatewayApi"
+  ]
+}

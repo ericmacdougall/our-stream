@@ -1,0 +1,67 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Failing control for ci/assert-rendered.py: one Deployment that breaks every invariant (privileged, host
+# network, root, admin URL in the api, TRUST_PROXY=true, envFrom, a compose development secret), no Job, an
+# Ingress that sends /api to web, and NetworkPolicies that admit every namespace and web -> api.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bad-api
+  labels:
+    app.kubernetes.io/component: api
+spec:
+  selector:
+    matchLabels: { app: bad-api }
+  template:
+    metadata:
+      labels: { app: bad-api }
+    spec:
+      hostNetwork: true
+      containers:
+        - name: api
+          image: example.invalid/api:0
+          securityContext:
+            privileged: true
+          envFrom:
+            - secretRef: { name: everything }
+          env:
+            - name: TRUST_PROXY
+              value: 'true'
+            - name: DATABASE_ADMIN_URL
+              value: postgres://example.invalid/not-a-real-credential
+            - name: SESSION_SECRET
+              value: dev-only-session-secret-change-me-0123456789
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bad-web
+  labels:
+    app.kubernetes.io/component: web
+spec:
+  ports: [{ port: 3000 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bad-ingress
+spec:
+  rules:
+    - host: bad.example.test
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend: { service: { name: bad-web, port: { name: http } } }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: bad-api-policy
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/component: api }
+  ingress:
+    - from:
+        - namespaceSelector: {}
+        - podSelector:
+            matchLabels: { app.kubernetes.io/component: web }

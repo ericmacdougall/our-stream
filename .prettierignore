@@ -13,3 +13,5 @@ blob-report
 .fixtures
 apps/web/public/sw.js
 apps/web/next-env.d.ts
+# Helm templates are Go templates, not plain YAML
+infra/helm/*/templates
