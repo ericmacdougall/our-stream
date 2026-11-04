@@ -109,17 +109,20 @@ export default function SearchScreen() {
         }}
         keyboardShouldPersistTaps="handled"
         renderItem={({ item }) => (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`${item.title}, ${strings.feed.by(item.owner.displayName)}`}
-            onPress={() => open(item, item.snippets.find((s) => s.tMs !== null)?.tMs ?? null)}
-            style={({ pressed }) => [base.card, pressed && styles.pressed]}
-          >
-            <Text style={base.heading}>{item.title}</Text>
-            <Text style={base.muted}>
-              {strings.feed.by(item.owner.displayName)}
-              {item.streams[0] ? ` · ${item.streams[0].name}` : ''}
-            </Text>
+          <View style={base.card}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`${item.title}, ${strings.feed.by(item.owner.displayName)}`}
+              accessibilityHint="Opens the clip"
+              onPress={() => open(item, item.snippets.find((s) => s.tMs !== null)?.tMs ?? null)}
+              style={({ pressed }) => [pressed && styles.pressed]}
+            >
+              <Text style={base.heading}>{item.title}</Text>
+              <Text style={base.muted}>
+                {strings.feed.by(item.owner.displayName)}
+                {item.streams[0] ? ` · ${item.streams[0].name}` : ''}
+              </Text>
+            </Pressable>
             {item.snippets.map((s, i) => (
               <View key={i} style={styles.snippet}>
                 <Text style={styles.source}>{t.source[s.source] ?? s.source}</Text>
@@ -134,7 +137,7 @@ export default function SearchScreen() {
                 )}
               </View>
             ))}
-          </Pressable>
+          </View>
         )}
         ListFooterComponent={
           cursor ? (

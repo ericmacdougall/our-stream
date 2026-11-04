@@ -2,7 +2,7 @@
 // Share as link (ADR-0002: sharing never grants access). The recipient gets a notification; the
 // text offered to the share sheet is the server's linkPath on the web origin, never a media URL.
 import type { MemberSummary } from '@our-stream/contracts';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import {
   FlatList,
@@ -20,13 +20,21 @@ import { Notice } from '../../../components/Notice';
 import { strings } from '../../../i18n';
 import { errorCodeOf, errorMessage, isUnavailable } from '../../../lib/errors';
 import { shareText } from '../../../lib/media';
-import { useSignedIn } from '../../../lib/session-context';
+import { useSession, useSignedIn } from '../../../lib/session-context';
 import { base, colors, space } from '../../../lib/theme';
 
 type Member = z.output<typeof MemberSummary>;
 const t = strings.share;
 
-export default function ShareScreen() {
+/** Direct loads (deep links, web SSR) reach this route before the session exists: gate it. */
+export default function ShareScreenRoute() {
+  const { state } = useSession();
+  if (state.status === 'loading') return null;
+  if (state.status === 'signedOut') return <Redirect href="/sign-in" />;
+  return <ShareScreen />;
+}
+
+function ShareScreen() {
   const { api, me, server } = useSignedIn();
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();

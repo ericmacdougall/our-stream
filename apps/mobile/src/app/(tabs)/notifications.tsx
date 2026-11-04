@@ -4,7 +4,6 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { z } from 'zod';
-import { Button } from '../../components/Button';
 import { Notice } from '../../components/Notice';
 import { strings } from '../../i18n';
 import { errorMessage } from '../../lib/errors';
@@ -105,9 +104,6 @@ export default function NotificationsScreen() {
                 <Text style={base.muted}>{item.reason}</Text>
                 <Text style={base.muted}>{new Date(item.createdAt).toLocaleString()}</Text>
               </View>
-              {navigable && (
-                <Button label={t.open} variant="link" onPress={() => void open(item)} />
-              )}
             </Pressable>
           );
         }}

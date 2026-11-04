@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Content detail: player (opens at `?t=` for search hits), like, share, threaded comments.
 import type { ContentDetailM1b } from '@our-stream/contracts';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
@@ -32,13 +32,21 @@ import {
 import { describeError, errorCodeOf, errorMessage, isUnavailable } from '../../../lib/errors';
 import { optimisticToggle } from '../../../lib/feed';
 import { newId } from '../../../lib/ids';
-import { useSignedIn } from '../../../lib/session-context';
+import { useSession, useSignedIn } from '../../../lib/session-context';
 import { base, colors, space } from '../../../lib/theme';
 
 type Detail = z.output<typeof ContentDetailM1b>;
 const t = strings.comments;
 
-export default function ContentScreen() {
+/** Direct loads (deep links, web SSR) reach this route before the session exists: gate it. */
+export default function ContentScreenRoute() {
+  const { state } = useSession();
+  if (state.status === 'loading') return null;
+  if (state.status === 'signedOut') return <Redirect href="/sign-in" />;
+  return <ContentScreen />;
+}
+
+function ContentScreen() {
   const { api } = useSignedIn();
   const router = useRouter();
   const params = useLocalSearchParams<{ id: string; t?: string }>();
