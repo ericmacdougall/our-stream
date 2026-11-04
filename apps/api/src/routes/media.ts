@@ -99,7 +99,12 @@ export function registerMediaRoutes(fastify: FastifyInstance, ctx: AppContext): 
         const obj = await ctx.store.get(key);
         if (!obj) throw notFound('media_not_found', 'not found');
         const text = await readAll(obj.body);
-        const rewritten = rewritePlaylist(text, contentId, versionId, token ? (req.query.t ?? null) : null);
+        const rewritten = rewritePlaylist(
+          text,
+          contentId,
+          versionId,
+          token ? (req.query.t ?? null) : null,
+        );
         if (rewritten.dropped > 0)
           req.log.warn(
             { contentId, versionId, dropped: rewritten.dropped },

@@ -18,7 +18,6 @@ export function withoutSchemaStatement(plan: string): string {
   return plan.replace(SCHEMA_LINE_RE, '');
 }
 
-
 /** pg-boss publishes its schema version in package.json (`pgboss.schema`); the dist bundle does not export it. */
 export function targetSchemaVersion(): number {
   const require = createRequire(import.meta.url);

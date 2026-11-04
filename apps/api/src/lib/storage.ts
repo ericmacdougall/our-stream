@@ -76,10 +76,17 @@ function isNotFound(err: unknown): boolean {
 
 /** Origins allowed to upload directly: S3_CORS_ORIGINS or APP_BASE_URL plus its loopback twin. */
 export function corsOrigins(config: Config): string[] {
-  const explicit = config.S3_CORS_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean);
+  const explicit = config.S3_CORS_ORIGINS.split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
   if (explicit.length > 0) return explicit;
   const base = new URL(config.APP_BASE_URL);
-  const twin = base.hostname === 'localhost' ? '127.0.0.1' : base.hostname === '127.0.0.1' ? 'localhost' : null;
+  const twin =
+    base.hostname === 'localhost'
+      ? '127.0.0.1'
+      : base.hostname === '127.0.0.1'
+        ? 'localhost'
+        : null;
   const out = [base.origin];
   if (twin) out.push(`${base.protocol}//${twin}${base.port ? ':' + base.port : ''}`);
   return out;

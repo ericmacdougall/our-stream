@@ -94,9 +94,13 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     keyGenerator: (req) => {
       const cookie = req.headers.cookie ?? '';
       const m = /(?:^|;\s*)os_session=([^;]+)/.exec(cookie);
-      const bearer = req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : null;
+      const bearer = req.headers.authorization?.startsWith('Bearer ')
+        ? req.headers.authorization.slice(7)
+        : null;
       const cred = m?.[1] ?? bearer;
-      return cred ? `s:${createHash('sha256').update(cred).digest('base64url').slice(0, 24)}` : `ip:${req.ip}`;
+      return cred
+        ? `s:${createHash('sha256').update(cred).digest('base64url').slice(0, 24)}`
+        : `ip:${req.ip}`;
     },
   });
   await app.register(swagger, {
