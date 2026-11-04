@@ -33,3 +33,71 @@ export function withReaction<T extends Reactable>(
 export function removeItem<T extends Identified>(items: T[], id: string): T[] {
   return items.filter((i) => i.id !== id);
 }
+
+/**
+ * State after a feed page arrives. A replacing load (first page, refresh) resets the active card to
+ * the first item: fine for a user-initiated refresh, wrong for a stale-item refresh mid-scroll
+ * (the FlatList keeps its offset while the first card would start playing off-screen).
+ */
+export function applyPage<T extends Identified>(
+  prev: T[],
+  page: T[],
+  replace: boolean,
+  activeId: string | null,
+): { items: T[]; activeId: string | null } {
+  if (!replace) return { items: mergeItems(prev, page), activeId };
+  return { items: page, activeId: page[0]?.id ?? null };
+}
+
+interface Versioned extends Identified {
+  versionId: string;
+  durationMs: number | null;
+  width: number | null;
+  height: number | null;
+  title: string;
+  description: string;
+}
+interface RefreshedDetail {
+  id: string;
+  title: string;
+  description: string;
+  currentVersion: {
+    id: string;
+    durationMs: number | null;
+    width: number | null;
+    height: number | null;
+  } | null;
+  media: unknown | null;
+  likeCount: number;
+  liked: boolean;
+  commentCount: number;
+}
+
+/**
+ * Replaces one feed item in place from its refetched detail (a newer version became current),
+ * keeping list order, pagination and the active card. Returns the list without the item when the
+ * detail no longer has a playable current version.
+ */
+export function applyStaleItem<
+  T extends Versioned & { media: unknown } & Reactable & { commentCount: number },
+>(items: T[], detail: RefreshedDetail): T[] {
+  if (!detail.currentVersion || !detail.media) return removeItem(items, detail.id);
+  const v = detail.currentVersion;
+  return items.map((i) =>
+    i.id === detail.id
+      ? {
+          ...i,
+          title: detail.title,
+          description: detail.description,
+          versionId: v.id,
+          durationMs: v.durationMs,
+          width: v.width,
+          height: v.height,
+          media: detail.media,
+          likeCount: detail.likeCount,
+          liked: detail.liked,
+          commentCount: detail.commentCount,
+        }
+      : i,
+  );
+}

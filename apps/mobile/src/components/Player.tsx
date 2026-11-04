@@ -134,7 +134,8 @@ export function Player(props: PlayerProps) {
               props.onUnavailable();
               break;
             case 'stale':
-              tracker.release(ids, type);
+              // The caller refetches the item; meanwhile the same milestone must not be resent every second.
+              tracker.release(ids, type, { retryAfterMs: ENGAGEMENT_BACKOFF_MS });
               props.onStale();
               break;
             case 'abandon':

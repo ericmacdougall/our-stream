@@ -2,7 +2,7 @@
 // Content detail: player (opens at `?t=` for search hits), like, share, threaded comments.
 import type { ContentDetailM1b } from '@our-stream/contracts';
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -69,11 +69,16 @@ function ContentScreen() {
 
   const unavailable = useCallback(() => setGone(true), []);
 
+  // Responses for a previous clip (the route param changed mid-request) must not land in state.
+  const generation = useRef(0);
+
   const loadComments = useCallback(
     async (after: string | null) => {
+      const gen = generation.current;
       const result = await api.GET('/v1/content/{id}/comments', {
         params: { path: { id }, query: { limit: 50, ...(after ? { cursor: after } : {}) } },
       });
+      if (gen !== generation.current) return;
       if (result.error || !result.data) {
         if (isUnavailable(errorCodeOf(result), result.response.status)) setGone(true);
         else setError(errorMessage(result));
@@ -87,23 +92,34 @@ function ContentScreen() {
     [api, id],
   );
 
-  const loadDetail = useCallback(async () => {
-    try {
-      const result = await api.GET('/v1/content/{id}', { params: { path: { id } } });
-      if (result.error || !result.data) {
-        if (isUnavailable(errorCodeOf(result), result.response.status)) setGone(true);
-        else setError(errorMessage(result));
-        return;
+  /** Loads the detail; `withComments` false (stale refresh) leaves the comment list and its cursor alone. */
+  const loadDetail = useCallback(
+    async (withComments: boolean) => {
+      const gen = generation.current;
+      try {
+        const result = await api.GET('/v1/content/{id}', { params: { path: { id } } });
+        if (gen !== generation.current) return;
+        if (result.error || !result.data) {
+          if (isUnavailable(errorCodeOf(result), result.response.status)) setGone(true);
+          else setError(errorMessage(result));
+          return;
+        }
+        setDetail(result.data);
+        if (withComments) await loadComments(null);
+      } catch {
+        if (gen === generation.current) setError(strings.errors.offline);
       }
-      setDetail(result.data);
-      await loadComments(null);
-    } catch {
-      setError(strings.errors.offline);
-    }
-  }, [api, id, loadComments]);
+    },
+    [api, id, loadComments],
+  );
 
   useEffect(() => {
-    void loadDetail();
+    generation.current += 1;
+    setDetail(null);
+    setThreads([]);
+    setCursor(null);
+    setGone(false);
+    void loadDetail(true);
   }, [loadDetail]);
 
   const toggleLike = async () => {
@@ -231,7 +247,7 @@ function ContentScreen() {
                   active
                   startMs={startMs}
                   onUnavailable={unavailable}
-                  onStale={() => void loadDetail()}
+                  onStale={() => void loadDetail(false)}
                 />
               ) : (
                 <Text style={[base.body, { color: colors.onVideo, padding: space.lg }]}>

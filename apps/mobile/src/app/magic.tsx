@@ -105,10 +105,15 @@ export default function MagicScreen() {
 
   const keepSession = async () => {
     if (!server || !incoming) return;
-    // Revoke the session the link created so the unused secret does not stay valid server-side.
-    await logoutBestEffort(createApi({ apiUrl: server.apiUrl, secret: incoming.secret }));
-    setIncoming(null);
-    router.replace('/(tabs)/feed');
+    setBusy(true);
+    try {
+      // Revoke the session the link created so the unused secret does not stay valid server-side.
+      await logoutBestEffort(createApi({ apiUrl: server.apiUrl, secret: incoming.secret }));
+      setIncoming(null);
+      router.replace('/(tabs)/feed');
+    } finally {
+      setBusy(false);
+    }
   };
 
   const toSignIn = () => {
@@ -154,7 +159,7 @@ export default function MagicScreen() {
           <Button label={strings.signIn.submit} onPress={() => void consume()} busy={busy} />
         </View>
       )}
-      <Button label={strings.signIn.title} variant="link" onPress={toSignIn} />
+      {!incoming && <Button label={strings.signIn.title} variant="link" onPress={toSignIn} />}
     </ScrollView>
   );
 }

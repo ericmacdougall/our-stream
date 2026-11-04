@@ -9,7 +9,13 @@ import { FeedCard, type FeedItem } from '../../components/FeedCard';
 import { Notice } from '../../components/Notice';
 import { strings } from '../../i18n';
 import { errorCodeOf, errorMessage, isUnavailable } from '../../lib/errors';
-import { mergeItems, optimisticToggle, removeItem, withReaction } from '../../lib/feed';
+import {
+  applyStaleItem,
+  mergeItems,
+  optimisticToggle,
+  removeItem,
+  withReaction,
+} from '../../lib/feed';
 import { useSignedIn, useSession } from '../../lib/session-context';
 import { base, colors, space } from '../../lib/theme';
 import { useReducedMotion } from '../../lib/useReducedMotion';
@@ -88,6 +94,29 @@ export default function FeedScreen() {
     setItems((prev) => removeItem(prev, id));
     setNotice(strings.feed.unavailable);
   }, []);
+
+  // A newer version is current: refetch just that item and swap it in place, so the list, the
+  // pagination cursor and the active card stay where the user is. One refetch per item at a time.
+  const staleInFlight = useRef(new Set<string>());
+  const stale = useCallback(
+    async (id: string) => {
+      if (staleInFlight.current.has(id)) return;
+      staleInFlight.current.add(id);
+      try {
+        const result = await api.GET('/v1/content/{id}', { params: { path: { id } } });
+        if (result.error || !result.data) {
+          if (isUnavailable(errorCodeOf(result), result.response.status)) unavailable(id);
+          return;
+        }
+        setItems((prev) => applyStaleItem(prev, result.data!));
+      } catch {
+        // Offline: the card keeps its current (stale) version; the backoff limits retries.
+      } finally {
+        staleInFlight.current.delete(id);
+      }
+    },
+    [api, unavailable],
+  );
 
   const toggleLike = async (item: FeedItem) => {
     if (likeBusy.current.has(item.id)) return;
@@ -192,7 +221,7 @@ export default function FeedScreen() {
                   router.push({ pathname: '/content/[id]/share', params: { id: item.id } })
                 }
                 onUnavailable={() => unavailable(item.id)}
-                onStale={() => void loadPage(null, true)}
+                onStale={() => void stale(item.id)}
               />
             )}
           />
