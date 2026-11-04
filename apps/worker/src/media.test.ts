@@ -52,6 +52,8 @@ function ctx(pool: pg.Pool, s: ObjectStore): JobContext {
     store: s,
     asr: createFakeAsr(),
     limits: { ...limitsFromEnv({}), tmpRoot: null },
+    mailer: { send: async () => undefined },
+    appBaseUrl: 'http://localhost:3000',
     log: { info: () => undefined, warn: () => undefined, error: () => undefined },
     now: () => new Date(),
   };
