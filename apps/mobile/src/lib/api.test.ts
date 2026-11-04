@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from 'vitest';
-import { createApi, logoutBestEffort, routeOf, TRANSPORT_HEADER } from './api';
+import { createApi, logoutBestEffort, routeOf, splitSignIn, TRANSPORT_HEADER } from './api';
 
 interface Seen {
   url: string;
@@ -103,6 +103,20 @@ describe('logoutBestEffort', () => {
     await expect(
       logoutBestEffort(createApi({ apiUrl: 'https://x.com', secret: 's', fetch: down })),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe('splitSignIn', () => {
+  it('separates the secret from the profile and never leaves it inside me', () => {
+    type Resp = { user: { id: string }; csrfToken: string; sessionToken?: string };
+    const out = splitSignIn<Resp>({ user: { id: 'u' }, csrfToken: 'c', sessionToken: 'sess' });
+    expect(out.secret).toBe('sess');
+    expect(out.me).toEqual({ user: { id: 'u' }, csrfToken: 'c' });
+    expect('sessionToken' in out.me).toBe(false);
+    expect(splitSignIn<Resp>({ user: { id: 'u' }, csrfToken: 'c' }).secret).toBeNull();
+    expect(
+      splitSignIn<Resp>({ user: { id: 'u' }, csrfToken: 'c', sessionToken: '' }).secret,
+    ).toBeNull();
   });
 });
 

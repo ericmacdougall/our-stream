@@ -2,7 +2,8 @@
 // Storage backends. Secrets (session, pinned servers) go to expo-secure-store; bookkeeping
 // (engagement sessions) goes to AsyncStorage. SecureStore exists only on Android, iOS and tvOS, so
 // the web target (used for development click tests, not distribution) keeps secrets in
-// sessionStorage, which dies with the tab.
+// sessionStorage in development builds only; any other web build keeps them in memory so a
+// production web export never persists a secret.
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
@@ -24,9 +25,13 @@ function webSessionStore(): KeyValueStore {
   };
 }
 
+const DEV_BUILD: boolean = typeof __DEV__ !== 'undefined' && __DEV__;
+
 export const secureStore: KeyValueStore =
   Platform.OS === 'web'
-    ? webSessionStore()
+    ? DEV_BUILD
+      ? webSessionStore()
+      : memoryStore()
     : {
         get: (key) => SecureStore.getItemAsync(key),
         set: (key, value) =>

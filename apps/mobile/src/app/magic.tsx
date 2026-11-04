@@ -7,7 +7,7 @@ import { ScrollView, Text, View } from 'react-native';
 import { Button } from '../components/Button';
 import { Notice } from '../components/Notice';
 import { strings } from '../i18n';
-import { createApi } from '../lib/api';
+import { createApi, logoutBestEffort, splitSignIn } from '../lib/api';
 import {
   discardMagicLink,
   hasPendingMagicLink,
@@ -57,17 +57,23 @@ export default function MagicScreen() {
     setBusy(true);
     setError(null);
     try {
-      if (session.state.status === 'signedIn') await session.signOut();
+      // Validate the link first; an invalid or crafted link must not touch the current session.
       const api = createApi({ apiUrl: server.apiUrl });
       const result = await api.POST('/v1/auth/magic-link/consume', { body: { token } });
       const message = errorMessage(result);
-      const secret = (result.data as { sessionToken?: string } | undefined)?.sessionToken;
-      if (message || !secret || !result.data) {
+      if (message || !result.data) {
         setError(message ?? strings.errors.generic);
         setPending(false);
         return;
       }
-      await session.signIn(server, secret, result.data as Me);
+      const { secret, me } = splitSignIn(result.data as Me & { sessionToken?: string });
+      if (!secret) {
+        setError(strings.errors.generic);
+        setPending(false);
+        return;
+      }
+      if (session.state.status === 'signedIn') await logoutBestEffort(session.state.api);
+      await session.signIn(server, secret, me);
       router.replace('/(tabs)/feed');
     } catch {
       setError(strings.errors.offline);
@@ -96,9 +102,7 @@ export default function MagicScreen() {
             {strings.signIn.serverLabel}: {new URL(server.apiUrl).host}
           </Text>
           {session.state.status === 'signedIn' && (
-            <Text style={base.muted}>
-              {strings.account.signedInAs(session.state.me.user.email)}
-            </Text>
+            <Text style={base.muted}>{strings.magic.replaces(session.state.me.user.email)}</Text>
           )}
           <Button label={strings.signIn.submit} onPress={() => void consume()} busy={busy} />
         </View>

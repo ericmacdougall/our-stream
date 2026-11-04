@@ -4,7 +4,16 @@
 import type { MemberSummary } from '@our-stream/contracts';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { FlatList, Pressable, Share, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  FlatList,
+  Platform,
+  Pressable,
+  Share,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import type { z } from 'zod';
 import { Button } from '../../../components/Button';
 import { Notice } from '../../../components/Notice';
@@ -35,12 +44,11 @@ export default function ShareScreen() {
         if (!live) return;
         if (result.error || !result.data) setError(errorMessage(result));
         else {
-          // Contract: `{ items }`; an older API answers a bare array, accepted until it is aligned.
-          const raw: unknown = result.data;
-          const list = (
-            Array.isArray(raw) ? raw : ((raw as { items?: Member[] }).items ?? [])
-          ) as Member[];
-          setMembers(list.filter((m) => m.status === 'active' && m.userId !== me.user.id));
+          setMembers(
+            result.data.items.filter(
+              (m: Member) => m.status === 'active' && m.userId !== me.user.id,
+            ),
+          );
         }
       })
       .catch(() => live && setError(strings.errors.offline));
@@ -93,7 +101,9 @@ export default function ShareScreen() {
               <Button
                 label={t.openSheet}
                 onPress={() =>
-                  void Share.share({ message: outcome.link, url: outcome.link }).catch(() => {})
+                  void Share.share(
+                    Platform.OS === 'ios' ? { url: outcome.link } : { message: outcome.link },
+                  ).catch(() => {})
                 }
               />
             )}

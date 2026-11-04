@@ -24,11 +24,11 @@ export const strings = {
     passwordLabel: 'Password',
     submit: 'Sign in',
     magicLink: 'Email me a sign-in link',
-    magicSent:
-      'If that address has an account, a sign-in link is on its way. Open it on this device.',
+    magicSent: 'If that address has an account, a sign-in link is on its way.',
     manualServer: 'Enter the server address manually',
     serverLabel: 'Server',
     changeServer: 'Use a different server',
+    editEmail: 'Edit email',
     discovering: 'Looking up your organisation’s server…',
     confirmTitle: 'Confirm your server',
     confirmBody: (host: string, domain: string) =>
@@ -64,6 +64,7 @@ export const strings = {
   magic: {
     title: 'Signing you in…',
     needServer: 'Choose your server first, then open the sign-in link again.',
+    replaces: (email: string) => `Signing in with this link will sign out ${email}.`,
     failed: 'This sign-in link is invalid, expired or already used. Request a new one.',
   },
   feed: {

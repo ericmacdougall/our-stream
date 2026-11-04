@@ -31,6 +31,7 @@ export default function FeedScreen() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [height, setHeight] = useState(0);
   const likeBusy = useRef(new Set<string>());
+  const lastActive = useRef<string | null>(null);
   const [, bump] = useState(0);
 
   const loadPage = useCallback(
@@ -65,8 +66,13 @@ export default function FeedScreen() {
   useFocusEffect(
     useCallback(() => {
       if (items.length === 0) void loadPage(null, true);
-      // Leaving the tab pauses playback through `active`.
-      return () => setActiveId(null);
+      else if (lastActive.current) setActiveId(lastActive.current);
+      // Leaving the tab pauses playback through `active`; the card is restored on return.
+      return () =>
+        setActiveId((cur) => {
+          if (cur) lastActive.current = cur;
+          return null;
+        });
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [loadPage]),
   );

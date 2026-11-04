@@ -17,6 +17,8 @@ export const MAX_SESSIONS = 200;
 const INDEX_KEY = 'eng:index';
 
 export interface PlaybackIds {
+  /** The signed-in user: bookkeeping is per user so a shared device never inherits another user's session. */
+  userId: string;
   contentId: string;
   versionId: string;
 }
@@ -63,12 +65,14 @@ export interface Tracker {
   release(ids: PlaybackIds, type: Milestone): void;
 }
 
-const keyFor = (ids: PlaybackIds) => `eng:${ids.contentId}:${ids.versionId}`;
+const keyFor = (ids: PlaybackIds) => `eng:${ids.userId}:${ids.contentId}:${ids.versionId}`;
 
 export function createTracker(deps: TrackerDeps): Tracker {
   const now = deps.now ?? Date.now;
   const cache = new Map<string, StoredSession>();
   const inflight = new Set<string>();
+  // Writes (record + index) run one at a time so two commits cannot interleave the index rewrite.
+  let queue: Promise<void> = Promise.resolve();
 
   async function load(ids: PlaybackIds): Promise<StoredSession | null> {
     const key = keyFor(ids);
@@ -97,15 +101,18 @@ export function createTracker(deps: TrackerDeps): Tracker {
     }
   }
 
-  async function save(ids: PlaybackIds, session: StoredSession): Promise<void> {
+  function save(ids: PlaybackIds, session: StoredSession): Promise<void> {
     const key = keyFor(ids);
     cache.set(key, session);
-    try {
-      await deps.store.set(key, JSON.stringify(session));
-      await prune(key, session.updatedAt);
-    } catch {
-      // Bookkeeping must never interrupt playback; the in-memory cache still dedupes this run.
-    }
+    queue = queue.then(async () => {
+      try {
+        await deps.store.set(key, JSON.stringify(session));
+        await prune(key, session.updatedAt);
+      } catch {
+        // Bookkeeping must never interrupt playback; the in-memory cache still dedupes this run.
+      }
+    });
+    return queue;
   }
 
   async function prune(touched: string, at: number): Promise<void> {

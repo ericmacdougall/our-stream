@@ -2,12 +2,12 @@
 // Sign-in: email → server discovery (or the pinned server) → confirm the server once → password or
 // magic link. The server is shown before any credential is typed (Q5 trust rule).
 import { Redirect, useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, View } from 'react-native';
 import { Button } from '../components/Button';
 import { Notice } from '../components/Notice';
 import { strings } from '../i18n';
-import { createApi } from '../lib/api';
+import { createApi, splitSignIn } from '../lib/api';
 import { discoverServer, emailDomain, hostRelation, type ServerConfig } from '../lib/discovery';
 import { errorMessage } from '../lib/errors';
 import { ALLOW_LOOPBACK_HTTP } from '../lib/runtime';
@@ -33,11 +33,16 @@ export default function SignInScreen() {
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
-  // Coming back from the manual server screen: use what it pinned.
+  // Coming back from the manual server screen: use what it pinned. Runs on focus only, so typing an
+  // address never auto-advances mid-keystroke.
+  const emailRef = useRef(email);
+  emailRef.current = email;
+  const stepRef = useRef(step.kind);
+  stepRef.current = step.kind;
   useFocusEffect(
     useCallback(() => {
-      if (step.kind !== 'email') return;
-      const domain = emailDomain(email);
+      if (stepRef.current !== 'email') return;
+      const domain = emailDomain(emailRef.current);
       if (!domain) return;
       void pinnedServer(secureStore, domain, { allowLoopbackHttp: ALLOW_LOOPBACK_HTTP }).then(
         (server) => {
@@ -47,7 +52,7 @@ export default function SignInScreen() {
           }
         },
       );
-    }, [email, step.kind]),
+    }, []),
   );
 
   if (session.state.status === 'signedIn') return <Redirect href="/(tabs)/feed" />;
@@ -100,13 +105,17 @@ export default function SignInScreen() {
         setError(message);
         return;
       }
-      const secret = (result.data as { sessionToken?: string } | undefined)?.sessionToken;
-      if (!secret || !result.data) {
+      if (!result.data) {
+        setError(strings.errors.generic);
+        return;
+      }
+      const { secret, me } = splitSignIn(result.data as Me & { sessionToken?: string });
+      if (!secret) {
         setError(strings.errors.generic);
         return;
       }
       setPassword('');
-      await session.signIn(server, secret, result.data as Me);
+      await session.signIn(server, secret, me);
       router.replace('/(tabs)/feed');
     } catch {
       setError(strings.errors.offline);
@@ -246,6 +255,14 @@ export default function SignInScreen() {
               variant="secondary"
               onPress={() => void requestMagicLink(step.server)}
               disabled={busy}
+            />
+            <Button
+              label={t.editEmail}
+              variant="link"
+              onPress={() => {
+                setPassword('');
+                setStep({ kind: 'email' });
+              }}
             />
             <Button
               label={t.changeServer}

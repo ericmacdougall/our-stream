@@ -57,6 +57,17 @@ export function createApi(opts: ApiOptions): ApiClient {
 }
 
 /**
+ * Splits a sign-in response into the bearer secret and the profile that screens may hold: the
+ * secret must never travel inside `me` (React context, dev tools, crash breadcrumbs).
+ */
+export function splitSignIn<T extends { sessionToken?: string }>(
+  data: T,
+): { secret: string | null; me: Omit<T, 'sessionToken'> } {
+  const { sessionToken, ...me } = data;
+  return { secret: sessionToken && sessionToken.length > 0 ? sessionToken : null, me };
+}
+
+/**
  * Revokes the server session before the local copy is cleared. Best effort: a network failure must
  * not keep a user signed in locally, and a 401 means the session was already gone.
  */

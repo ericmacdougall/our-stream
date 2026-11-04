@@ -37,15 +37,18 @@ interface MediaToken {
 }
 
 export function Player(props: PlayerProps) {
-  const { api, server } = useSignedIn();
+  const { api, server, me } = useSignedIn();
   const reducedMotion = useReducedMotion();
-  const ids = { contentId: props.contentId, versionId: props.versionId };
+  const ids = { userId: me.user.id, contentId: props.contentId, versionId: props.versionId };
 
   const tokenRef = useRef<MediaToken | null>(null);
   const sessionRef = useRef<PlaybackSession | null>(null);
   const sentRef = useRef<Set<Milestone>>(new Set());
   const positionMsRef = useRef(0);
   const retriedRef = useRef(false);
+  // Seek target applied once the replaced source is ready to play (a seek before that may be dropped).
+  const pendingSeekRef = useRef<number | null>(null);
+  const completedRef = useRef(false);
   const [posterUri, setPosterUri] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [needsTap, setNeedsTap] = useState(false);
@@ -88,8 +91,10 @@ export function Player(props: PlayerProps) {
         metadata: { title: props.title },
       };
       try {
+        const target = clampSeek(seekToMs, props.durationMs);
+        pendingSeekRef.current = target > 0 ? target : null;
         await player.replaceAsync(source);
-        if (seekToMs > 0) player.currentTime = seekToMs / 1000;
+        if (target > 0) player.currentTime = target / 1000;
         if (autoplay) player.play();
         else setNeedsTap(true);
       } catch {
@@ -120,6 +125,7 @@ export function Player(props: PlayerProps) {
         }
         await tracker.commit(ids, type);
         sentRef.current.add(type);
+        if (type === 'complete') completedRef.current = true;
       } catch {
         tracker.release(ids, type);
       }
@@ -149,10 +155,19 @@ export function Player(props: PlayerProps) {
   }, [props.active, props.contentId, props.versionId]);
 
   useEventListener(player, 'playingChange', ({ isPlaying }) => {
-    if (isPlaying) {
-      setNeedsTap(false);
-      void send('view_start', positionMsRef.current);
+    if (!isPlaying) return;
+    setNeedsTap(false);
+    if (completedRef.current) {
+      // Replay after completion: a new playback session, counted as a rewatch by the server.
+      completedRef.current = false;
+      void tracker.start(ids).then((session) => {
+        sessionRef.current = session;
+        sentRef.current = new Set(session.sent);
+        void send('view_start', positionMsRef.current);
+      });
+      return;
     }
+    void send('view_start', positionMsRef.current);
   });
   useEventListener(player, 'timeUpdate', ({ currentTime }) => {
     const positionMs = currentTime * 1000;
@@ -165,6 +180,12 @@ export function Player(props: PlayerProps) {
     void send('complete', positionMsRef.current);
   });
   useEventListener(player, 'statusChange', ({ status: next }) => {
+    if (next === 'readyToPlay' && pendingSeekRef.current !== null) {
+      const target = pendingSeekRef.current;
+      pendingSeekRef.current = null;
+      if (Math.abs(player.currentTime * 1000 - target) > 1500) player.currentTime = target / 1000;
+      return;
+    }
     if (next !== 'error') return;
     if (!retriedRef.current) {
       // Most likely an expired or rotated token: fetch a new one and resume where we were.
@@ -218,6 +239,13 @@ export function Player(props: PlayerProps) {
       )}
     </View>
   );
+}
+
+/** Keeps a requested start position inside the clip (an out-of-range `t` would otherwise complete it). */
+export function clampSeek(seekToMs: number, durationMs: number | null): number {
+  const wanted = Math.max(0, Math.floor(seekToMs));
+  if (!durationMs || durationMs <= 0) return wanted;
+  return Math.min(wanted, Math.max(0, durationMs - 1000));
 }
 
 const styles = StyleSheet.create({

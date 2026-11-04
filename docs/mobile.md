@@ -52,10 +52,12 @@ development and in memory otherwise, because SecureStore does not exist on web.
 
 Magic links: the API mails `${APP_BASE_URL}/magic?token=...`. The app handles that path as a universal
 link (once the deployment publishes `apple-app-site-association` / `assetlinks.json` for the web
-origin; not part of this milestone) and as `ourstream://magic?token=...`. The token is held in memory
-(never in navigation state or storage) and consumed against the last confirmed server only when the
-user taps "Sign in"; a consumed token is remembered for the process so a replayed launch URL cannot
-resubmit it.
+origin; until then the link opens in the web app, which consumes the token, so the mobile magic flow
+is inactive) and as `ourstream://magic?token=...`. The token is moved into a memory slot (a token the
+router parsed from the URL is moved there and stripped from the route parameters) and consumed
+against the last confirmed server only when the user taps "Sign in". The link is validated first; only
+a successful consume replaces an existing session (which is then revoked), and a consumed token is
+remembered for the process so a replayed launch URL cannot resubmit it.
 
 ## Playback and media tokens
 
@@ -70,11 +72,13 @@ share text (`src/lib/media.ts` refuses to share anything but the server's `linkP
 
 ## Engagement
 
-`src/lib/engagement.ts` keeps one client `sessionKey` per (content, version) playback session with the
+`src/lib/engagement.ts` keeps one client `sessionKey` per (user, content, version) playback session with the
 milestones already sent (`view_start`, `progress_25/50/75`, `complete`) in AsyncStorage, so a restart
 never resends a milestone. A milestone is claimed in memory before the request, persisted only after
 the server answered, and released on failure. After `complete` (or 24 h) the next play opens a new
-session, which the server counts as a rewatch. Records are pruned beyond 200 entries or 30 days.
+session, which the server counts as a rewatch (also when the clip is replayed without leaving the
+screen). Records are keyed by user so a shared device never inherits another user's session, written
+one at a time, and pruned beyond 200 entries or 30 days.
 
 ## Accessibility
 
@@ -82,6 +86,15 @@ Every control has a role and label; like buttons expose `selected`; targets are 
 scales with the system font size; previous/next buttons move through the feed without a swipe; the
 system "reduce motion" setting turns off autoplay and scroll animation; overlay text sits on a scrim.
 Status and error texts are live regions. VoiceOver/TalkBack runs are a manual checklist (MOB-A11Y).
+
+## Known limitations (M1b)
+
+- No device run yet (no simulator on the build machine): native HLS playback, token refresh with
+  source replace + seek, SecureStore and VoiceOver/TalkBack are covered by code review and unit tests,
+  not by an observed device session. The web target proves request shapes and screen flows only.
+- `expo lint` has no configuration in `apps/mobile` yet; prettier, tsc, vitest and the SPDX/licence
+  gates run.
+- A cold start while offline (or a 5xx from `GET /v1/me`) shows the sign-in screen instead of a retry.
 
 ## Running it
 

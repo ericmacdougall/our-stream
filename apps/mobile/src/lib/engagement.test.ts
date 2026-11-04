@@ -19,7 +19,7 @@ describe('dueMilestones', () => {
 });
 
 describe('createTracker', () => {
-  const ids = { contentId: 'c1', versionId: 'v1' };
+  const ids = { userId: 'u1', contentId: 'c1', versionId: 'v1' };
 
   it('keeps one session key per content across restarts and sends each milestone once', async () => {
     const store = memoryStore();
@@ -83,12 +83,12 @@ describe('createTracker', () => {
   });
 
   it('keeps separate state per version and survives a corrupted record', async () => {
-    const store = memoryStore({ 'eng:c1:v1': '{nope' });
+    const store = memoryStore({ 'eng:u1:c1:v1': '{nope' });
     const t = createTracker({ store, newKey: () => 'k', now: () => 5 });
     expect((await t.start(ids)).sessionKey).toBe('k');
     t.take(ids, 'view_start');
     await t.commit(ids, 'view_start');
-    const v2 = { contentId: 'c1', versionId: 'v2' };
+    const v2 = { userId: 'u1', contentId: 'c1', versionId: 'v2' };
     await t.start(v2);
     expect(t.take(v2, 'view_start')).toBe(true);
   });
@@ -97,11 +97,38 @@ describe('createTracker', () => {
     const store = memoryStore();
     let now = 1;
     const t = createTracker({ store, newKey: () => 'k', now: () => now++ });
-    for (let i = 0; i <= MAX_SESSIONS; i++) await t.start({ contentId: `c${i}`, versionId: 'v' });
-    const keys = Object.keys(store.dump()).filter((k) => k.startsWith('eng:c'));
+    for (let i = 0; i <= MAX_SESSIONS; i++)
+      await t.start({ userId: 'u1', contentId: `c${i}`, versionId: 'v' });
+    const keys = Object.keys(store.dump()).filter((k) => k.startsWith('eng:u1:c'));
     expect(keys).toHaveLength(MAX_SESSIONS);
-    expect(keys).not.toContain('eng:c0:v');
-    expect(keys).toContain(`eng:c${MAX_SESSIONS}:v`);
+    expect(keys).not.toContain('eng:u1:c0:v');
+    expect(keys).toContain(`eng:u1:c${MAX_SESSIONS}:v`);
+  });
+
+  it('keeps users apart on a shared device', async () => {
+    const store = memoryStore();
+    const a = createTracker({ store, newKey: () => 'key-a', now: () => 1 });
+    await a.start(ids);
+    a.take(ids, 'view_start');
+    await a.commit(ids, 'view_start');
+    const b = createTracker({ store, newKey: () => 'key-b', now: () => 2 });
+    const other = { ...ids, userId: 'u2' };
+    expect((await b.start(other)).sessionKey).toBe('key-b');
+    expect(b.take(other, 'view_start')).toBe(true);
+    expect((await b.start(ids)).sent).toEqual(['view_start']);
+  });
+
+  it('serialises index writes from concurrent commits', async () => {
+    const store = memoryStore();
+    const t = createTracker({ store, newKey: () => 'k', now: () => 1 });
+    const a = { userId: 'u', contentId: 'a', versionId: 'v' };
+    const b = { userId: 'u', contentId: 'b', versionId: 'v' };
+    await Promise.all([t.start(a), t.start(b)]);
+    t.take(a, 'view_start');
+    t.take(b, 'view_start');
+    await Promise.all([t.commit(a, 'view_start'), t.commit(b, 'view_start')]);
+    const index = JSON.parse(store.dump()['eng:index'] ?? '[]') as [string, number][];
+    expect(index.map(([k]) => k).sort()).toEqual(['eng:u:a:v', 'eng:u:b:v']);
   });
 
   it('never throws when the store fails', async () => {
