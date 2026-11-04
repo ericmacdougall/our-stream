@@ -2,6 +2,7 @@
 import createOpenApiClient from 'openapi-fetch';
 import type { paths } from './generated/openapi.js';
 import type { M1aPaths } from './m1a-paths.js';
+import type { M1bPaths } from './m1b-paths.js';
 
 export interface ClientOptions {
   baseUrl: string;
@@ -10,8 +11,8 @@ export interface ClientOptions {
   fetch?: typeof fetch;
 }
 
-/** Generated paths plus the hand-typed M1a routes until the API emits them (see m1a-paths.ts). */
-export type ApiPaths = paths & M1aPaths;
+/** Generated paths plus the hand-typed M1a/M1b routes until the API emits them (see m1a-paths.ts, m1b-paths.ts). */
+export type ApiPaths = paths & M1aPaths & M1bPaths;
 export type ApiClient = ReturnType<typeof createClient>;
 
 export function createClient(opts: ClientOptions) {
