@@ -79,13 +79,9 @@ export const FeedItemView = forwardRef<HTMLElement, FeedItemViewProps>(function 
           onTimeMs={setTimeMs}
           onError={onError}
         />
+        {/* The overlay's visible text is its accessible name (WCAG 2.5.3): no aria-label override. */}
         {active && !shouldPlay ? (
-          <button
-            type="button"
-            className="play-overlay"
-            onClick={onTogglePlay}
-            aria-label={t('feed.play')}
-          >
+          <button type="button" className="play-overlay" onClick={onTogglePlay}>
             {reducedMotion ? t('feed.playReducedMotion') : t('feed.play')}
           </button>
         ) : null}

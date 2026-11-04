@@ -156,7 +156,8 @@ export function SetPasswordForm() {
               type={show ? 'text' : 'password'}
               required
               minLength={PASSWORD_MIN}
-              maxLength={PASSWORD_MAX}
+              // No maxLength: the browser would truncate typed or pasted text silently; the
+              // client check reports "too long" instead so nothing shorter than intended is set.
               autoComplete="new-password"
               autoCapitalize="off"
               spellCheck={false}
@@ -187,7 +188,6 @@ export function SetPasswordForm() {
               name="confirm-password"
               type={show ? 'text' : 'password'}
               required
-              maxLength={PASSWORD_MAX}
               autoComplete="new-password"
               autoCapitalize="off"
               spellCheck={false}
