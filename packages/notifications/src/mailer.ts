@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Email channel adapter (ADR-0005 §4, ADR-0011: a fake for every adapter). Plain text only: digests
 // carry titles the recipient may currently read and nothing else, so there is nothing to render as HTML.
+import { createHash } from 'node:crypto';
 import nodemailer from 'nodemailer';
 
 export interface MailMessage {
@@ -32,12 +33,22 @@ export class FakeMailer implements Mailer {
   }
 }
 
-/** Without SMTP_URL the worker logs that a digest was skipped (recipient and count only, never content). */
+/** Stable, non-reversible handle for an address so logs never carry the address itself (R16). */
+export function addressHandle(to: string): string {
+  return createHash('sha256').update(to.trim().toLowerCase()).digest('hex').slice(0, 12);
+}
+
+/** Replaces anything that looks like an email address, for SMTP error messages that echo the recipient. */
+export function redactAddresses(text: string): string {
+  return text.replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '[email]');
+}
+
+/** Without SMTP_URL the worker logs that a digest was skipped (address handle and subject only, never content). */
 export class LoggingMailer implements Mailer {
   constructor(private readonly log: { warn: (o: object, msg?: string) => void }) {}
   async send(message: MailMessage): Promise<void> {
     this.log.warn(
-      { to: message.to, subject: message.subject },
+      { toHandle: addressHandle(message.to), subject: message.subject },
       'SMTP_URL not configured; message not delivered',
     );
   }

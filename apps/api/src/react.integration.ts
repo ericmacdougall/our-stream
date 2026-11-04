@@ -351,10 +351,27 @@ describe.skipIf(!integrationReady)('reactions, comments, share (integration)', (
         })
       ).status,
     ).toBe(200);
+    // Removing a reply keeps the thread shape (tombstone) but no longer counts it.
+    const threads = (await h.call('GET', `/v1/content/${contentId}/comments?limit=50`, viewer))
+      .body as ListDto;
+    const root = threads.items.find((c) => c.body === 'Great summary')!;
+    expect(root.replyCount).toBe(2);
+    const welcome = root.replies!.find((r) => r.body === 'Welcome')!;
+    expect((await h.call('POST', `/v1/comments/${welcome.id}/remove`, viewer, {})).status).toBe(
+      200,
+    );
+    const afterReply = (await h.call('GET', `/v1/content/${contentId}/comments?limit=50`, viewer))
+      .body as ListDto;
+    const rootAfter = afterReply.items.find((c) => c.id === root.id)!;
+    expect(rootAfter.replyCount).toBe(1);
+    expect(rootAfter.replies!.find((r) => r.id === welcome.id)).toMatchObject({
+      state: 'removed',
+      body: null,
+    });
     const commentCount = (await h.call('GET', `/v1/content/${contentId}`, viewer)).body as {
       commentCount: number;
     };
-    expect(commentCount.commentCount).toBe(6); // root, 2 replies, café, decomposed-pairs, AKIA (allowed under off); tombstones are not counted
+    expect(commentCount.commentCount).toBe(5); // root, 1 visible reply, café, decomposed-pairs, AKIA (allowed under off); tombstones are not counted
   });
 
   it('comments can be disabled per stream by the owner and refused with 409', async () => {

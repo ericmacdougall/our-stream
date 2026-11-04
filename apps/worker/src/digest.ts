@@ -5,9 +5,10 @@
 // database with readerVisible at build time (platform_digest_items), so a title the member can no longer
 // see is never emailed. A failed send is retried on later runs of the same day (at most 3 attempts) and
 // its items are re-resolved; a crash between a successful send and the mark can repeat one email, which
-// is accepted and documented (docs/development.md).
+// is accepted and documented (docs/development.md); a claim left `pending` by a crash before the mark is
+// retried after 30 minutes like a failed send (migration 0011).
 import { z } from 'zod';
-import { renderDigest, type DigestItem } from '@our-stream/notifications';
+import { redactAddresses, renderDigest, type DigestItem } from '@our-stream/notifications';
 import type { Handler, JobContext } from './jobs.js';
 
 export const DigestJob = z.object({
@@ -59,16 +60,14 @@ async function deliver(
   try {
     await ctx.mailer.send(message);
   } catch (err) {
+    const reason = redactAddresses((err as Error).message).slice(0, 300);
     await ctx.platformPool.query('SELECT platform_digest_mark($1, $2, $3, false, $4)', [
       orgId,
       c.user_id,
       day,
-      (err as Error).message,
+      reason,
     ]);
-    ctx.log.error(
-      { orgId, userId: c.user_id, day, err: (err as Error).message },
-      'digest send failed',
-    );
+    ctx.log.error({ orgId, userId: c.user_id, day, err: reason }, 'digest send failed');
     return false;
   }
   await ctx.platformPool.query('SELECT platform_digest_mark($1, $2, $3, true, NULL)', [

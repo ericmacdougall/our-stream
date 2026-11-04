@@ -56,7 +56,7 @@ interface DetailRow {
 const HITS_CTE = `
   WITH q AS (SELECT websearch_to_tsquery('simple', $3::text) AS tsq),
   hits AS (
-    SELECT c.id, date_trunc('milliseconds', c.publish_at) AS publish_at,
+    SELECT c.id, c.publish_at,
            round(GREATEST(ts_rank_cd(c.search_tsv, q.tsq, 32),
                           COALESCE((SELECT max(ts_rank_cd(k.tsv, q.tsq, 32)) FROM chunk k
                                     WHERE k.org_id = c.org_id AND k.content_version_id = v.id AND k.tsv @@ q.tsq), 0))::numeric, 6) AS score

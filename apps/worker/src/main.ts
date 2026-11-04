@@ -45,6 +45,16 @@ await boss.start();
 
 // Email channel (ADR-0005): SMTP when configured, otherwise digests are logged as skipped.
 const smtpUrl = process.env['SMTP_URL'];
+const appBaseUrl = process.env['APP_BASE_URL'];
+if (
+  smtpUrl &&
+  (!appBaseUrl || (process.env['NODE_ENV'] === 'production' && !appBaseUrl.startsWith('https://')))
+) {
+  log.error(
+    'SMTP_URL is set but APP_BASE_URL is missing or not https; digests would carry unusable links',
+  );
+  process.exit(2);
+}
 const mailer = smtpUrl
   ? createSmtpMailer(smtpUrl, process.env['MAIL_FROM'] ?? 'our-stream <no-reply@localhost>')
   : new LoggingMailer(log);
@@ -57,7 +67,7 @@ const ctx: JobContext = {
   asr,
   limits,
   mailer,
-  appBaseUrl: process.env['APP_BASE_URL'] ?? 'http://localhost:3000',
+  appBaseUrl: appBaseUrl ?? 'http://localhost:3000',
   log,
   now: () => new Date(),
 };

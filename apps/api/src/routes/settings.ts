@@ -64,7 +64,18 @@ export function registerSettingsRoutes(fastify: FastifyInstance, ctx: AppContext
         ) as Partial<typeof current>;
         const next = { ...current, ...patch };
         await writeOrgSettings(client, next);
-        await audit(client, 'org.settings_updated', { changed: Object.keys(patch) });
+        await audit(client, 'org.settings_updated', {
+          changed: Object.keys(patch),
+          // Privacy-relevant switches keep their old and new values in the trail (review L7).
+          privacyMode:
+            patch.privacyMode !== undefined
+              ? { from: current.privacyMode, to: next.privacyMode }
+              : undefined,
+          commentScanPolicy:
+            patch.commentScanPolicy !== undefined
+              ? { from: current.commentScanPolicy, to: next.commentScanPolicy }
+              : undefined,
+        });
         return next;
       });
     },

@@ -81,7 +81,7 @@ export function registerFeedRoutes(fastify: FastifyInstance, ctx: AppContext): v
         const epochs = await readEpochs(client); // before the query it keys (ADR-0004)
         if (!epochs.active) throw forbidden('not_member', 'membership is not active');
         const r = await client.query<FeedRow>(
-          `SELECT c.id, c.kind, c.title, c.description, c.language, c.links, c.chapters, date_trunc('milliseconds', c.publish_at) AS publish_at, c.owner_id,
+          `SELECT c.id, c.kind, c.title, c.description, c.language, c.links, c.chapters, c.publish_at, c.owner_id,
                   a.display_name AS owner_name, c.content_epoch::text, c.event_tags AS tags,
                   v.id AS version_id, v.duration_ms, v.width, v.height, v.assets,
                   EXISTS (SELECT 1 FROM user_content_state s WHERE s.org_id = c.org_id AND s.user_id = $2 AND s.content_id = c.id
@@ -97,8 +97,8 @@ export function registerFeedRoutes(fastify: FastifyInstance, ctx: AppContext): v
              AND ${streamFilterSql('c', '$1', '$2', '$3')}
              AND ${tagFilterSql('c', '$7')}
              AND (NOT $8::boolean OR ${pinnedSql('c', '$2')})
-             AND ($4::timestamptz IS NULL OR (date_trunc('milliseconds', c.publish_at), c.id) < ($4::timestamptz, $5::uuid))
-           ORDER BY date_trunc('milliseconds', c.publish_at) DESC, c.id DESC
+             AND ($4::timestamptz IS NULL OR (c.publish_at, c.id) < ($4::timestamptz, $5::uuid))
+           ORDER BY c.publish_at DESC, c.id DESC
            LIMIT $6`,
           [
             auth.orgId,

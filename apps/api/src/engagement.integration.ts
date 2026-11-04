@@ -49,7 +49,7 @@ describe.skipIf(!integrationReady)('engagement, stats and privacy mode (integrat
     h.call('POST', `/v1/content/${contentId}/engagement`, s, { versionId, ...body });
 
   beforeAll(async () => {
-    h = await createHarness('engage');
+    h = await createHarness('engage', { WRITE_RATE_LIMIT_MAX: '10000' });
     owner = await h.signup('owner', 'acme');
     author = await h.invite(owner, 'author', 'contributor');
     viewer = await h.invite(owner, 'viewer', 'member');
@@ -255,20 +255,75 @@ describe.skipIf(!integrationReady)('engagement, stats and privacy mode (integrat
       (await h.call('PATCH', '/v1/me/preferences', viewer, { emailDigest: 'weekly' })).status,
     ).toBe(400);
   });
-  it('caps distinct playback sessions per user, item and day', async () => {
+  it('caps distinct playback sessions per user, item and day at exactly 50; other items still record', async () => {
     const r = await Promise.all(
       Array.from({ length: 60 }, (_, i) =>
         event(moderator, { sessionKey: `flood-${i}`, type: 'view_start' }),
       ),
     );
     expect(r.every((x) => x.status === 200)).toBe(true);
-    expect(r.filter((x) => (x.body as { recorded: boolean }).recorded).length).toBeLessThanOrEqual(
-      50,
-    );
+    expect(r.filter((x) => (x.body as { recorded: boolean }).recorded)).toHaveLength(50);
     const rows = await h.admin.query<{ n: number }>(
-      `SELECT count(*)::int AS n FROM engagement_event WHERE content_id = $1 AND user_id = $2`,
+      `SELECT count(DISTINCT session_key)::int AS n FROM engagement_event WHERE content_id = $1 AND user_id = $2`,
       [contentId, moderator.userId],
     );
-    expect(rows.rows[0]!.n).toBeLessThanOrEqual(50);
+    expect(rows.rows[0]!.n).toBe(50);
+    expect((await event(moderator, { sessionKey: 'flood-61', type: 'view_start' })).body).toEqual({
+      recorded: false,
+    });
+    // The cap is per item: the same user still records on another clip.
+    const other = await createPlayableContent(h, author, 'Other measured');
+    const pub = await h.call('POST', `/v1/content/${other.contentId}/publish`, author, {
+      audience: [{ type: 'everyone' }],
+    });
+    expect(pub.status).toBe(403); // contributors cannot publish org-wide; publish to the dept instead
+    const streams = (await h.call('GET', '/v1/streams', author)).body as Array<{
+      id: string;
+      kind: string;
+    }>;
+    const deptId = streams.find((s) => s.kind === 'department')!.id;
+    expect(
+      (
+        await h.call('POST', `/v1/content/${other.contentId}/publish`, author, {
+          audience: [{ type: 'stream', streamId: deptId }],
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await h.call('POST', `/v1/content/${other.contentId}/engagement`, moderator, {
+          versionId: other.versionId,
+          sessionKey: 'flood-0',
+          type: 'view_start',
+        })
+      ).body,
+    ).toEqual({ recorded: true });
+  });
+
+  it('a member who first used the M1a /view route still gets watch_count 1 on the first engagement view_start (review M1)', async () => {
+    expect(
+      (
+        await h.call('POST', `/v1/content/${contentId}/view`, owner, {
+          versionId,
+          completed: false,
+        })
+      ).status,
+    ).toBe(200);
+    expect((await event(owner, { sessionKey: 'owner-1', type: 'view_start' })).body).toEqual({
+      recorded: true,
+    });
+    const state = await h.admin.query<{ watch_count: number }>(
+      `SELECT watch_count FROM user_content_state WHERE content_id = $1 AND user_id = $2`,
+      [contentId, owner.userId],
+    );
+    expect(state.rows[0]!.watch_count).toBe(1);
+    expect((await event(owner, { sessionKey: 'owner-2', type: 'view_start' })).body).toEqual({
+      recorded: true,
+    });
+    const again = await h.admin.query<{ watch_count: number }>(
+      `SELECT watch_count FROM user_content_state WHERE content_id = $1 AND user_id = $2`,
+      [contentId, owner.userId],
+    );
+    expect(again.rows[0]!.watch_count).toBe(1); // not completed: a second session is not a rewatch
   });
 });

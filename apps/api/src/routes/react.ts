@@ -53,8 +53,8 @@ interface CommentRow {
   removed_at: Date | null;
 }
 
-// created_at is truncated to milliseconds so the keyset cursor (ms precision in JS) compares exactly.
-const COMMENT_COLUMNS = `k.id, k.content_id, k.root_id, k.author_id, a.display_name AS author_name, k.body, k.state, k.report_count, date_trunc('milliseconds', k.created_at) AS created_at, k.removed_at`;
+// created_at is stored at millisecond precision (migration 0011) so the JS keyset cursor compares exactly.
+const COMMENT_COLUMNS = `k.id, k.content_id, k.root_id, k.author_id, a.display_name AS author_name, k.body, k.state, k.report_count, k.created_at, k.removed_at`;
 const COMMENT_FROM = `FROM comment k LEFT JOIN LATERAL platform_account_get(k.author_id) a ON true`;
 const MAX_REPLIES = 50;
 
@@ -127,7 +127,7 @@ async function fullComment(
     [client.tenant.orgId, row.id],
   );
   const count = await client.query<{ n: number }>(
-    'SELECT count(*)::int AS n FROM comment WHERE org_id = $1 AND root_id = $2',
+    `SELECT count(*)::int AS n FROM comment WHERE org_id = $1 AND root_id = $2 AND state = 'visible'`,
     [client.tenant.orgId, row.id],
   );
   return {
@@ -217,11 +217,11 @@ export function registerReactRoutes(fastify: FastifyInstance, ctx: AppContext): 
         const mod = await canModerate(client, req.params.id);
         const viewer = { userId: auth.userId, canModerate: mod };
         const roots = await client.query<CommentRow & { reply_count: number }>(
-          `SELECT ${COMMENT_COLUMNS}, (SELECT count(*)::int FROM comment r WHERE r.org_id = k.org_id AND r.root_id = k.id) AS reply_count
+          `SELECT ${COMMENT_COLUMNS}, (SELECT count(*)::int FROM comment r WHERE r.org_id = k.org_id AND r.root_id = k.id AND r.state = 'visible') AS reply_count
            ${COMMENT_FROM}
            WHERE k.org_id = $1 AND k.content_id = $2 AND k.root_id IS NULL
-             AND ($3::timestamptz IS NULL OR (date_trunc('milliseconds', k.created_at), k.id) > ($3::timestamptz, $4::uuid))
-           ORDER BY date_trunc('milliseconds', k.created_at), k.id LIMIT $5`,
+             AND ($3::timestamptz IS NULL OR (k.created_at, k.id) > ($3::timestamptz, $4::uuid))
+           ORDER BY k.created_at, k.id LIMIT $5`,
           [
             auth.orgId,
             req.params.id,

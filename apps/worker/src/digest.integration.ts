@@ -40,6 +40,9 @@ describe.skipIf(!enabled)('digest, comment fan-out and maintenance (integration)
 
   const q = async <T extends pg.QueryResultRow>(sql: string, params: unknown[] = []) =>
     (await admin.query<T>(sql, params)).rows;
+  // Other suites share the database and runDigest covers every org, so assertions stay scoped to this
+  // suite's addresses and org rows rather than the run-wide counters.
+  const mine = () => mailer.sent.filter((m) => m.to.endsWith(`-${tag}@example.test`));
   const notify = (user: string, kind: string, content: string, dedupe: string) =>
     q(`SELECT platform_notify($1, $2, $3, 'audience', $4, NULL, NULL, $5, '{}'::jsonb)`, [
       ids.org,
@@ -148,12 +151,11 @@ describe.skipIf(!enabled)('digest, comment fan-out and maintenance (integration)
   it('sends one digest per eligible member per day with permission-checked titles; a failed send is retried next run', async () => {
     mailer.failNext(1); // the first send of the run fails: whichever member it is, it must be retried later
     const first = await runDigest(ctx, day);
-    expect(first.failed).toBe(1);
+    expect(first.failed).toBeGreaterThanOrEqual(1);
     const sentTo = (name: string) => mailer.to(email(name));
+    expect(mine()).toHaveLength(2);
     const second = await runDigest(ctx, day);
-    expect(second.retried).toBe(1);
-    expect(second.failed).toBe(0);
-    expect(second.skipped).toBe(0);
+    expect(second.retried).toBeGreaterThanOrEqual(1);
     expect(sentTo('daily')).toHaveLength(1);
     expect(sentTo('lost')).toHaveLength(1);
     expect(sentTo('flaky')).toHaveLength(1);
@@ -169,10 +171,9 @@ describe.skipIf(!enabled)('digest, comment fan-out and maintenance (integration)
     expect(lost.text).not.toContain('Dept clip'); // access lost since the notification
     expect(lost.text).toContain('An item you can no longer view had an update.');
     expect(lost.text).not.toContain(`/content/${ids.deptClip}`);
-    // Third run the same day: nothing new, nothing repeated.
-    const third = await runDigest(ctx, day);
-    expect(third.sent + third.retried).toBe(0);
-    expect(mailer.sent).toHaveLength(3);
+    // Third run the same day: nothing new, nothing repeated for this org.
+    await runDigest(ctx, day);
+    expect(mine()).toHaveLength(3);
     const rows = await q<{
       user_id: string;
       status: string;
@@ -190,6 +191,66 @@ describe.skipIf(!enabled)('digest, comment fan-out and maintenance (integration)
       [ids.org],
     );
     expect(undigested[0]!.n).toBe(2); // off + gone: never claimed, never emailed
+  });
+
+  it('a claim left pending by a crash is retried after 30 minutes; a fresh pending claim is not (review M2)', async () => {
+    const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+    const stale = (
+      await q<{ id: string }>(
+        `SELECT platform_notify($1, $2, 'content.published', 'audience', $3, NULL, NULL, 'published:stale', '{}'::jsonb)`,
+        [ids.org, ids.daily, ids.orgClip],
+      )
+    ).length;
+    expect(stale).toBe(1);
+    const staleId = (
+      await q<{ id: string }>(
+        `SELECT id FROM notification WHERE org_id = $1 AND user_id = $2 AND dedupe_key = 'published:stale'`,
+        [ids.org, ids.daily],
+      )
+    )[0]!.id;
+    expect(
+      (
+        await q<{ ok: boolean }>(`SELECT platform_digest_claim($1, $2, $3, $4::uuid[]) AS ok`, [
+          ids.org,
+          ids.daily,
+          tomorrow,
+          [staleId],
+        ])
+      )[0]!.ok,
+    ).toBe(true);
+    await q(
+      `UPDATE email_digest SET claimed_at = now() - interval '45 minutes' WHERE org_id = $1 AND user_id = $2 AND digest_date = $3`,
+      [ids.org, ids.daily, tomorrow],
+    );
+    // A fresh claim for another member stays pending (its worker may still be sending).
+    await q(
+      `SELECT platform_notify($1, $2, 'content.published', 'audience', $3, NULL, NULL, 'published:fresh', '{}'::jsonb)`,
+      [ids.org, ids.flaky, ids.orgClip],
+    );
+    const freshId = (
+      await q<{ id: string }>(
+        `SELECT id FROM notification WHERE org_id = $1 AND user_id = $2 AND dedupe_key = 'published:fresh'`,
+        [ids.org, ids.flaky],
+      )
+    )[0]!.id;
+    await q(`SELECT platform_digest_claim($1, $2, $3, $4::uuid[])`, [
+      ids.org,
+      ids.flaky,
+      tomorrow,
+      [freshId],
+    ]);
+    const before = mine().length;
+    const run = await runDigest(ctx, tomorrow);
+    expect(run.retried).toBeGreaterThanOrEqual(1);
+    expect(mine()).toHaveLength(before + 1);
+    expect(mailer.to(email('daily'))).toHaveLength(2);
+    expect(mailer.to(email('flaky'))).toHaveLength(1); // unchanged: the fresh claim was not resent
+    const rows = await q<{ user_id: string; status: string }>(
+      `SELECT user_id, status FROM email_digest WHERE org_id = $1 AND digest_date = $2 ORDER BY user_id`,
+      [ids.org, tomorrow],
+    );
+    expect(rows.find((r) => r.user_id === ids.daily)!.status).toBe('sent');
+    expect(rows.find((r) => r.user_id === ids.flaky)!.status).toBe('pending');
   });
 
   it('comment.created notifies the content owner and the root author once, never the commenter', async () => {
