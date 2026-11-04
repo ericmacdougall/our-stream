@@ -110,9 +110,11 @@ async function signedIn(
   reply: FastifyReply,
   s: { token: string; sessionId: string; userId: string; orgId: string | null },
 ): Promise<z.infer<typeof AuthResponseM1b>> {
-  setSessionCookie(reply, ctx.config, s.token);
-  const me = await buildMe(ctx, s.userId, s.sessionId, sha256(s.token), s.orgId);
+  // One copy of the credential per client: native clients asked for the token in the body and must
+  // not also receive the cookie; web clients get the cookie only (mobile owner review).
   const wantsBearer = req.headers[TRANSPORT_HEADER] === 'bearer';
+  if (!wantsBearer) setSessionCookie(reply, ctx.config, s.token);
+  const me = await buildMe(ctx, s.userId, s.sessionId, sha256(s.token), s.orgId);
   return wantsBearer ? { ...me, sessionToken: s.token } : me;
 }
 
