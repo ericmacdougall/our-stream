@@ -36,6 +36,7 @@ export const Me = z.object({
   csrfToken: z.string(),
 });
 export const SwitchOrgRequest = z.object({ orgId: Uuid });
+export const SetPasswordRequest = z.object({ password: z.string().min(12).max(256) });
 /**
  * Sign-in responses (signup, login, magic-link consume). `sessionToken` is present only when the client
  * asked for bearer transport (header `x-session-transport: bearer`, native apps); web uses the cookie.

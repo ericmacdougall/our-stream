@@ -21,6 +21,7 @@ import type {
   SignupRequest,
   Stream,
   StreamRole,
+  SetPasswordRequest,
   SwitchOrgRequest,
   UpdateContentRequest,
   UploadCompleteRequest,
@@ -58,6 +59,7 @@ export interface M1aPaths {
   '/v1/auth/signup': { post: Op<z.input<typeof SignupRequest>, z.output<typeof Me>> };
   '/v1/auth/login': { post: Op<z.input<typeof LoginRequest>, z.output<typeof Me>> };
   '/v1/auth/magic-link': { post: Op<z.input<typeof MagicLinkRequest>, z.output<typeof Ok>> };
+  '/v1/auth/password': { post: Op<z.input<typeof SetPasswordRequest>, z.output<typeof Ok>> };
   '/v1/auth/magic-link/consume': {
     post: Op<z.input<typeof MagicLinkConsumeRequest>, z.output<typeof Me>>;
   };

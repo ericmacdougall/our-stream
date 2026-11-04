@@ -73,18 +73,21 @@ export function NavBar() {
             </li>
           ))}
           <li>
+            {/* The accessible name is the visible text plus hidden "unread", so label-in-name
+                (WCAG 2.5.3) holds whatever the count: "Notifications 3 unread". */}
             <Link
               href="/notifications"
               aria-current={pathname === '/notifications' ? 'page' : undefined}
-              aria-label={
-                unread ? t('nav.notificationsWithCount', { count: unread }) : t('nav.notifications')
-              }
             >
               {t('nav.notifications')}
               {unread ? (
-                <span className="badge" data-testid="unread-badge" aria-hidden="true">
-                  {unread}
-                </span>
+                <>
+                  {' '}
+                  <span className="badge" data-testid="unread-badge">
+                    {unread}
+                  </span>
+                  <span className="visually-hidden"> {t('nav.unread', { count: unread })}</span>
+                </>
               ) : null}
             </Link>
           </li>

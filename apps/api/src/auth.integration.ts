@@ -262,6 +262,111 @@ describe.skipIf(!integrationReady)('auth (integration)', () => {
     expect([401, 403]).toContain(feed.status);
   });
 
+  it('signup cannot claim an invited address; the invitee sets a password from their own session (N2)', async () => {
+    const addr = h.email('invited-pending');
+    const inv = await h.call('POST', '/v1/invites', owner, { email: addr, role: 'member' });
+    expect(inv.status).toBe(200);
+    // Attacker who knows the address: no mailbox proof, must not obtain the account.
+    const hijack = await h.app.inject({
+      method: 'POST',
+      url: '/v1/auth/signup',
+      payload: {
+        email: addr,
+        password: 'attacker-chosen-password-1',
+        displayName: 'Mallory',
+        orgName: 'Mallory Org',
+        orgSlug: `mallory-${h.suffix}`,
+      },
+    });
+    expect(hijack.statusCode).toBe(409);
+    expect(hijack.json().error.code).toBe('email_taken');
+    const login = await h.call('POST', '/v1/auth/login', null, {
+      email: addr,
+      password: 'attacker-chosen-password-1',
+    });
+    expect(login.status).toBe(401);
+    // The real invitee follows the emailed link, then chooses a password once.
+    const invitee = await h.consumeLastLink(addr);
+    const set = await h.call('POST', '/v1/auth/password', invitee, {
+      password: 'invitee-chosen-password-1',
+    });
+    expect(set.status).toBe(200);
+    const again = await h.call('POST', '/v1/auth/password', invitee, {
+      password: 'another-password-attempt-2',
+    });
+    expect(again.status).toBe(409);
+    const ok = await h.call('POST', '/v1/auth/login', null, {
+      email: addr,
+      password: 'invitee-chosen-password-1',
+    });
+    expect(ok.status).toBe(200);
+    const anon = await h.call('POST', '/v1/auth/password', null, { password: 'nobody-here-123456' });
+    expect(anon.status).toBe(401);
+  });
+
+  it('login and magic-link requests are budgeted per email address independently of the client address (N1/N6)', async () => {
+    const mailer = new FakeMailer();
+    const config = loadConfig({
+      NODE_ENV: 'test',
+      LOG_LEVEL: 'error',
+      DATABASE_URL: process.env['DATABASE_URL']!,
+      AUTH_RATE_LIMIT_MAX: '10000',
+      AUTH_EMAIL_RATE_LIMIT_MAX: '2',
+    });
+    const app = await buildApp({ config, pool: h.pool, version: 'test', mailer, store: h.store });
+    try {
+      const attempt = (i: number, email: string) =>
+        app.inject({
+          method: 'POST',
+          url: '/v1/auth/login',
+          headers: { 'x-forwarded-for': `203.0.113.${i}` },
+          payload: { email, password: 'wrong-password-here' },
+        });
+      expect((await attempt(1, owner.email)).statusCode).toBe(401);
+      expect((await attempt(2, owner.email)).statusCode).toBe(401);
+      expect((await attempt(3, owner.email)).statusCode).toBe(429);
+      // Another account's budget is untouched.
+      expect((await attempt(4, h.email('someone-else'))).statusCode).toBe(401);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('the application role cannot list memberships by arbitrary user id; only a live session token reads them (N7)', async () => {
+    await expect(
+      h.pool.query('SELECT * FROM platform_memberships_of($1)', [owner.userId]),
+    ).rejects.toThrow(/permission denied/);
+    const bogus = await h.pool.query('SELECT * FROM platform_memberships_of_session($1)', [
+      Buffer.alloc(32, 7),
+    ]);
+    expect(bogus.rowCount).toBe(0);
+  });
+
+  it('rotating a forged session cookie or bearer token does not evade the per-IP auth limit (N1)', async () => {
+    const mailer = new FakeMailer();
+    const config = loadConfig({
+      NODE_ENV: 'test',
+      LOG_LEVEL: 'error',
+      DATABASE_URL: process.env['DATABASE_URL']!,
+      AUTH_RATE_LIMIT_MAX: '2',
+    });
+    const app = await buildApp({ config, pool: h.pool, version: 'test', mailer, store: h.store });
+    try {
+      const hit = (i: number) =>
+        app.inject({
+          method: 'POST',
+          url: '/v1/auth/magic-link',
+          headers: { cookie: `os_session=forged-${i}`, authorization: `Bearer forged-${i}` },
+          payload: { email: h.email('ratelimit-rotate') },
+        });
+      expect((await hit(1)).statusCode).toBe(200);
+      expect((await hit(2)).statusCode).toBe(200);
+      expect((await hit(3)).statusCode).toBe(429);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('auth routes are rate limited per IP', async () => {
     const mailer = new FakeMailer();
     const config = loadConfig({

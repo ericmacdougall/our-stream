@@ -12,6 +12,7 @@ import {
   Me,
   Ok,
   SignupRequest,
+  SetPasswordRequest,
   SwitchOrgRequest,
 } from '@our-stream/contracts';
 import type { AppContext } from '../context.js';
@@ -24,7 +25,7 @@ import {
   type AuthContext,
 } from '../lib/auth.js';
 import { normalizeEmail } from '../lib/email.js';
-import { conflict, unauthorized } from '../lib/errors.js';
+import { ApiError, conflict, unauthorized } from '../lib/errors.js';
 import { magicLinkMail } from '../lib/mailer.js';
 import {
   accountByEmail,
@@ -34,11 +35,12 @@ import {
   inviteAccept,
   magicLinkConsume,
   magicLinkCreate,
-  membershipsOf,
+  membershipsOfSession,
   orgCreate,
   sessionCreate,
   sessionRevoke,
   sessionSwitchOrg,
+  type Queryable,
   withPlatform,
   type MembershipRow,
 } from '../lib/platform.js';
@@ -66,11 +68,12 @@ export async function buildMe(
   ctx: AppContext,
   userId: string,
   sessionId: string,
+  tokenHash: Buffer,
   orgId: string | null,
 ): Promise<z.infer<typeof Me>> {
   const account = await accountGet(ctx.pool, userId);
   if (!account) throw unauthorized();
-  const memberships = await membershipsOf(ctx.pool, userId);
+  const memberships = await membershipsOfSession(ctx.pool, tokenHash);
   const current = orgId
     ? memberships.find((m) => m.orgId === orgId && m.status === 'active')
     : undefined;
@@ -84,6 +87,20 @@ export async function buildMe(
   };
 }
 
+/** Create the session, then land it on the first active org read through that very session
+ * (platform_memberships_of_session binds the memberships read to a live token, migration 0005). */
+async function sessionWithDefaultOrg(
+  client: Queryable,
+  userId: string,
+  tokenHash: Buffer,
+  ttlDays: number,
+): Promise<{ sessionId: string; orgId: string | null }> {
+  const sessionId = await sessionCreate(client, userId, null, tokenHash, ttlDays);
+  const orgId = firstActiveOrg(await membershipsOfSession(client, tokenHash));
+  if (orgId) await sessionSwitchOrg(client, tokenHash, orgId);
+  return { sessionId, orgId };
+}
+
 async function signedIn(
   ctx: AppContext,
   req: FastifyRequest,
@@ -91,15 +108,25 @@ async function signedIn(
   s: { token: string; sessionId: string; userId: string; orgId: string | null },
 ): Promise<z.infer<typeof AuthResponse>> {
   setSessionCookie(reply, ctx.config, s.token);
-  const me = await buildMe(ctx, s.userId, s.sessionId, s.orgId);
+  const me = await buildMe(ctx, s.userId, s.sessionId, sha256(s.token), s.orgId);
   const wantsBearer = req.headers[TRANSPORT_HEADER] === 'bearer';
   return wantsBearer ? { ...me, sessionToken: s.token } : me;
 }
 
 export function registerAuthRoutes(fastify: FastifyInstance, ctx: AppContext): void {
   const app = fastify.withTypeProvider<ZodTypeProvider>();
+  // Strictly per client IP: never key on cookies or tokens the client controls.
   const authLimit = {
-    rateLimit: { max: ctx.config.AUTH_RATE_LIMIT_MAX, timeWindow: '1 minute' },
+    rateLimit: {
+      max: ctx.config.AUTH_RATE_LIMIT_MAX,
+      timeWindow: '1 minute',
+      keyGenerator: (req: { ip: string }) => req.ip,
+    },
+  };
+  // Account-bound budget that holds even when the client address cannot be trusted (lib/limits.ts).
+  const emailBudget = (emailNormalized: string) => {
+    if (!ctx.limits.email.allow(emailNormalized))
+      throw new ApiError(429, 'rate_limited', 'too many attempts for this email address');
   };
 
   app.post(
@@ -111,17 +138,17 @@ export function registerAuthRoutes(fastify: FastifyInstance, ctx: AppContext): v
     async (req, reply) => {
       const body = req.body;
       const emailNormalized = normalizeEmail(body.email);
+      emailBudget(emailNormalized);
       const passwordHash = await argon2.hash(body.password, ARGON2_OPTIONS);
       const token = newSessionToken();
       const created = await withPlatform(ctx.pool, async (client) => {
         let userId: string;
-        // An invited address already has an account without a password: adopt it (F3). The lookup runs
-        // before the insert because a unique violation would abort the platform transaction.
+        // An existing account (including an invited one that has no password yet) is never claimed
+        // from an unauthenticated signup: that would let anyone who knows the address take it over.
+        // Invitees sign in through their emailed link and may then set a password (/v1/auth/password).
         const existing = await accountByEmail(client, emailNormalized);
         if (existing) {
-          if (!(await accountSetPasswordIfUnset(client, existing.id, passwordHash)))
-            throw conflict('email_taken', 'an account with this email already exists');
-          userId = existing.id;
+          throw conflict('email_taken', 'an account with this email already exists');
         } else {
           try {
             userId = await accountCreate(
@@ -165,22 +192,19 @@ export function registerAuthRoutes(fastify: FastifyInstance, ctx: AppContext): v
       schema: { tags: ['auth'], body: LoginRequest, response: { 200: AuthResponse } },
     },
     async (req, reply) => {
-      const account = await accountByEmail(ctx.pool, normalizeEmail(req.body.email));
+      const emailNormalized = normalizeEmail(req.body.email);
+      emailBudget(emailNormalized);
+      const account = await accountByEmail(ctx.pool, emailNormalized);
       const ok = account?.passwordHash
         ? await argon2.verify(account.passwordHash, req.body.password)
         : (await argon2.verify(await dummyHash, req.body.password), false);
       if (!ok || !account) throw unauthorized('invalid_credentials', 'invalid email or password');
-      const memberships = await membershipsOf(ctx.pool, account.id);
-      const orgId = firstActiveOrg(memberships);
       const token = newSessionToken();
-      const sessionId = await sessionCreate(
-        ctx.pool,
-        account.id,
-        orgId,
-        sha256(token),
-        ctx.config.SESSION_TTL_DAYS,
+      const tokenHash = sha256(token);
+      const session = await withPlatform(ctx.pool, (client) =>
+        sessionWithDefaultOrg(client, account.id, tokenHash, ctx.config.SESSION_TTL_DAYS),
       );
-      return signedIn(ctx, req, reply, { token, sessionId, userId: account.id, orgId });
+      return signedIn(ctx, req, reply, { token, ...session, userId: account.id });
     },
   );
 
@@ -209,7 +233,9 @@ export function registerAuthRoutes(fastify: FastifyInstance, ctx: AppContext): v
     },
     async (req) => {
       // Always 200: the response never reveals whether the address has an account.
-      const account = await accountByEmail(ctx.pool, normalizeEmail(req.body.email));
+      const emailNormalized = normalizeEmail(req.body.email);
+      emailBudget(emailNormalized);
+      const account = await accountByEmail(ctx.pool, emailNormalized);
       if (account) {
         const token = newSessionToken();
         await magicLinkCreate(
@@ -253,16 +279,26 @@ export function registerAuthRoutes(fastify: FastifyInstance, ctx: AppContext): v
           if (!accepted) throw conflict('invite_invalid', 'the invitation is no longer valid');
           orgId = link.orgId;
         } else {
-          orgId = firstActiveOrg(await membershipsOf(client, link.userId));
+          orgId = null;
         }
-        const sessionId = await sessionCreate(
-          client,
-          link.userId,
-          orgId,
-          sha256(token),
-          ctx.config.SESSION_TTL_DAYS,
-        );
-        return { sessionId, userId: link.userId, orgId };
+        const session = orgId
+          ? {
+              sessionId: await sessionCreate(
+                client,
+                link.userId,
+                orgId,
+                sha256(token),
+                ctx.config.SESSION_TTL_DAYS,
+              ),
+              orgId,
+            }
+          : await sessionWithDefaultOrg(
+              client,
+              link.userId,
+              sha256(token),
+              ctx.config.SESSION_TTL_DAYS,
+            );
+        return { ...session, userId: link.userId };
       });
       return signedIn(ctx, req, reply, { token, ...result });
     },
@@ -280,7 +316,7 @@ export function registerAuthRoutes(fastify: FastifyInstance, ctx: AppContext): v
     async (req) => {
       const auth: AuthContext = requireUser(req);
       const orgId = auth.membership?.status === 'active' ? auth.orgId : null;
-      return buildMe(ctx, auth.userId, auth.sessionId, orgId);
+      return buildMe(ctx, auth.userId, auth.sessionId, auth.tokenHash, orgId);
     },
   );
 
@@ -298,7 +334,22 @@ export function registerAuthRoutes(fastify: FastifyInstance, ctx: AppContext): v
       const auth = requireUser(req);
       const ok = await sessionSwitchOrg(ctx.pool, auth.tokenHash, req.body.orgId);
       if (!ok) throw conflict('not_member', 'no active membership in that organisation');
-      return buildMe(ctx, auth.userId, auth.sessionId, req.body.orgId);
+      return buildMe(ctx, auth.userId, auth.sessionId, auth.tokenHash, req.body.orgId);
+    },
+  );
+  // Lets an account that was created by an invite (no password) choose one, from a session that proves
+  // mailbox control (the invite link). Accounts that already have a password are refused.
+  app.post(
+    '/v1/auth/password',
+    { schema: { tags: ['auth'], body: SetPasswordRequest, response: { 200: Ok } } },
+    async (req) => {
+      const auth = requireUser(req);
+      const passwordHash = await argon2.hash(req.body.password, ARGON2_OPTIONS);
+      const ok = await withPlatform(ctx.pool, (client) =>
+        accountSetPasswordIfUnset(client, auth.userId, passwordHash),
+      );
+      if (!ok) throw conflict('password_set', 'this account already has a password');
+      return { ok: true as const };
     },
   );
 }

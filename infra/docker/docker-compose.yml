@@ -102,7 +102,9 @@ services:
     environment:
       <<: *app-env
       PORT: '4000'
-      TRUST_PROXY: uniquelocal # the web container forwards browser requests over the compose network
+      # TRUST_PROXY stays false: the web container's Next.js rewrites forward X-Forwarded-For as the
+      # browser sent it without appending the peer, so trusting it would let clients pick their own
+      # address. Set it to your ingress CIDR only when that ingress appends the peer (docs/development.md).
     ports:
       - '${BIND_ADDR:-127.0.0.1}:${API_PORT:-4000}:4000'
     depends_on:

@@ -48,8 +48,16 @@ const Env = z.object({
   INVITE_LINK_TTL_DAYS: z.coerce.number().int().min(1).max(30).default(14),
   MEDIA_TOKEN_TTL_SECONDS: z.coerce.number().int().min(60).max(900).default(900),
   UPLOAD_URL_TTL_SECONDS: z.coerce.number().int().min(60).max(3600).default(3600),
-  // Auth routes (signup, login, magic link request/consume) share a stricter per-IP limit.
+  // Auth routes (signup, login, magic link request/consume) share a stricter per-IP limit. Per-IP
+  // budgets only hold when TRUST_PROXY matches hops that append their peer to X-Forwarded-For
+  // (docs/development.md, "Proxies and rate limits"); the per-email budget holds regardless.
   AUTH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(20),
+  AUTH_EMAIL_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(10),
+  // Per minute. Unauthenticated requests by client address; authenticated by validated session id;
+  // media by the user id of a verified media token.
+  IP_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(600),
+  SESSION_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(600),
+  MEDIA_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(1200),
 });
 
 export type Config = z.infer<typeof Env>;

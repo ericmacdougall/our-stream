@@ -106,3 +106,31 @@ sign-in, invites and fan-out would silently return nothing. The schema lint fail
 owned by a role without bypass. Object storage must answer CORS preflights from the web origin for direct
 multipart uploads; the API applies a bucket CORS rule at startup for `APP_BASE_URL` (override with
 `S3_CORS_ORIGINS`). Emailed magic links and invites point at `APP_BASE_URL/magic?token=...`.
+
+## Proxies and rate limits
+
+`TRUST_PROXY` (default `false`) tells the API which upstream addresses may speak for the client via
+`X-Forwarded-For` (Fastify `trustProxy` syntax: `false`, `true`, a CIDR list or `uniquelocal`). Enable
+it only for hops that append their own peer to the header. Reverse proxies such as nginx
+(`$proxy_add_x_forwarded_for`), Traefik and Kubernetes ingresses do; the web app's Next.js rewrites
+(`/api/*`, `/media/*` to the API) do not: they forward the header exactly as the browser sent it. So
+with the compose stack and no ingress, `TRUST_PROXY` stays `false` and every browser request reaches the
+API from the web container's address. Behind an ingress that appends the peer, set `TRUST_PROXY` to
+the ingress and compose network CIDRs so `req.ip` is the real client.
+
+Because of that, only unauthenticated traffic is budgeted by address. Everything else uses a key the
+server validated itself (`apps/api/src/lib/limits.ts`), so neither a rotated cookie nor a spoofed
+address buys a fresh budget:
+
+| Budget (per minute)         | Key                                      | Setting                     |
+| --------------------------- | ---------------------------------------- | --------------------------- |
+| sign-in routes              | client address (`@fastify/rate-limit`)   | `AUTH_RATE_LIMIT_MAX` (20)  |
+| signup, login, magic link   | normalised email the request acts on     | `AUTH_EMAIL_RATE_LIMIT_MAX` (10) |
+| requests without a session  | client address                           | `IP_RATE_LIMIT_MAX` (600)   |
+| authenticated requests      | session id returned by the database      | `SESSION_RATE_LIMIT_MAX` (600) |
+| media served to a token     | user id inside the verified media token  | `MEDIA_RATE_LIMIT_MAX` (1200) |
+
+Budgets are in-memory per API process; a shared store is scheduled with multi-instance deployments
+(ADR-0004). When `TRUST_PROXY` is `false` behind the web container, the per-address budgets are shared
+by every browser user of that deployment, so raise `AUTH_RATE_LIMIT_MAX` and `IP_RATE_LIMIT_MAX` for
+larger single-host installs rather than enabling `TRUST_PROXY` for a hop that does not append its peer.

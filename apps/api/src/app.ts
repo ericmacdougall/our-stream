@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Fastify application factory. Routes are registered with Zod schemas so the OpenAPI document is
 // generated from the same definitions (ADR-0011). Personalised responses are private, no-store.
-import { createHash } from 'node:crypto';
 import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
@@ -20,6 +19,7 @@ import { HealthResponse, MetaResponse, type ErrorResponse } from '@our-stream/co
 import type { Config } from './config.js';
 import type { AppContext } from './context.js';
 import { enforceCsrf, resolveAuth } from './lib/auth.js';
+import { createLimiters } from './lib/limits.js';
 import { ApiError } from './lib/errors.js';
 import { LoggingMailer, createSmtpMailer, type Mailer } from './lib/mailer.js';
 import { createS3Store, type ObjectStore } from './lib/storage.js';
@@ -86,22 +86,13 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     exposedHeaders: ['content-range', 'accept-ranges'],
   });
   await app.register(cookie);
-  // Keyed by session when present so clients behind one proxy address (the web app's rewrite) do not
-  // share a budget; anonymous traffic stays keyed by client IP (honoured X-Forwarded-For via TRUST_PROXY).
+  // Only routes that opt in (auth routes, `config.rateLimit`) get this strict per-IP limit. All other
+  // budgets are applied in the preHandler below with validated keys (lib/limits.ts).
   await app.register(rateLimit, {
-    max: 300,
+    global: false,
+    max: deps.config.AUTH_RATE_LIMIT_MAX,
     timeWindow: '1 minute',
-    keyGenerator: (req) => {
-      const cookie = req.headers.cookie ?? '';
-      const m = /(?:^|;\s*)os_session=([^;]+)/.exec(cookie);
-      const bearer = req.headers.authorization?.startsWith('Bearer ')
-        ? req.headers.authorization.slice(7)
-        : null;
-      const cred = m?.[1] ?? bearer;
-      return cred
-        ? `s:${createHash('sha256').update(cred).digest('base64url').slice(0, 24)}`
-        : `ip:${req.ip}`;
-    },
+    keyGenerator: (req) => req.ip,
   });
   await app.register(swagger, {
     openapi: {
@@ -192,11 +183,23 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
 
   // Authenticated surface. Session, membership and CSRF are resolved per request from the database.
   app.decorateRequest('auth', null);
+  const limits = createLimiters(deps.config);
+  const rateLimited = () => new ApiError(429, 'rate_limited', 'too many requests');
   const pool = deps.pool;
   app.addHook('preHandler', async (req) => {
-    if ((req.routeOptions.config as { public?: boolean }).public) return;
+    const routeConfig = req.routeOptions.config as { public?: boolean; tokenAuth?: boolean };
+    if (routeConfig.public) {
+      if (!limits.ip.allow(req.ip)) throw rateLimited();
+      return;
+    }
     if (!pool) throw new ApiError(503, 'unavailable', 'database not configured');
     req.auth = await resolveAuth(req, pool);
+    if (req.auth) {
+      // Keyed by the session id the database returned, never by the raw credential a client could rotate.
+      if (!limits.session.allow(req.auth.sessionId)) throw rateLimited();
+    } else if (!routeConfig.tokenAuth && !limits.ip.allow(req.ip)) {
+      throw rateLimited();
+    }
     enforceCsrf(req, deps.config);
   });
 
@@ -209,6 +212,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
         ? createSmtpMailer(deps.config.SMTP_URL, deps.config.MAIL_FROM)
         : new LoggingMailer(app.log)),
     store: deps.store ?? createS3Store(deps.config),
+    limits,
   };
   registerAuthRoutes(app, ctx);
   registerOrgRoutes(app, ctx);

@@ -283,6 +283,24 @@ describe.skipIf(!integrationReady)('content, publish rules and feed (integration
     expect(republish.status).toBe(409);
   });
 
+  it('upload: a part count that does not fit the file size is refused before any version row or multipart upload exists (N5)', async () => {
+    const c = await h.call('POST', '/v1/content', contributor, { kind: 'clip', title: 'Parts cap' });
+    const contentId = (c.body as { id: string }).id;
+    const init = await h.call('POST', `/v1/content/${contentId}/upload/init`, contributor, {
+      fileName: 'small.mp4',
+      mimeType: 'video/mp4',
+      size: 1024,
+      parts: 40,
+    });
+    expect(init.status).toBe(400);
+    expect((init.body as { error: { code: string } }).error.code).toBe('too_many_parts');
+    const rows = await h.admin.query<{ n: number }>(
+      'SELECT count(*)::int AS n FROM content_version WHERE content_id = $1',
+      [contentId],
+    );
+    expect(rows.rows[0]!.n).toBe(0);
+  });
+
   it('upload: init issues presigned part URLs under the server-built key; complete verifies size and emits version_uploaded', async () => {
     const c = await h.call('POST', '/v1/content', contributor, { kind: 'clip', title: 'Upload' });
     const contentId = (c.body as { id: string }).id;

@@ -3,7 +3,7 @@
 // arguments, which jobs are enqueued, and that a failing event never blocks the batch.
 import { describe, expect, it } from 'vitest';
 import type pg from 'pg';
-import { dispatchEvent, drainOnce, retentionFor, type DomainEvent } from './outbox.js';
+import { dispatchEvent, drainOnce, retentionFor, type DomainEvent, MAX_EVENT_ATTEMPTS } from './outbox.js';
 import { contentTransition } from './transition.js';
 import type { JobContext } from './jobs.js';
 
@@ -21,6 +21,8 @@ interface Script {
   notifySetting?: boolean;
   events?: DomainEvent[];
   failNotifyFor?: string;
+  /** value returned by the attempts UPDATE after a failure (default 1) */
+  attemptsAfter?: number;
 }
 
 /** Minimal pg stand-in that answers the worker's SQL by function name and records every call. */
@@ -39,6 +41,8 @@ function fakeDb(script: Script) {
         if (script.failNotifyFor && params[1] === script.failNotifyFor) throw new Error('db down');
         return [{ inserted: true }];
       }
+      if (sql.includes('SET attempts = attempts + 1'))
+        return [{ attempts: script.attemptsAfter ?? 1 }];
       if (sql.includes('FROM platform.domain_event'))
         return (script.events ?? []) as unknown as Row[];
       if (sql.includes('platform_content_transition')) return [];
@@ -54,8 +58,9 @@ function fakeDb(script: Script) {
 function ctxWith(
   pool: pg.Pool,
   now = new Date('2026-11-03T12:00:00Z'),
-): JobContext & { sent: Row[] } {
+): JobContext & { sent: Row[]; errors: unknown[][] } {
   const sent: Row[] = [];
+  const errors: unknown[][] = [];
   return {
     tenantPool: pool,
     platformPool: pool,
@@ -68,9 +73,16 @@ function ctxWith(
     store: {} as JobContext['store'],
     asr: {} as JobContext['asr'],
     limits: {} as JobContext['limits'],
-    log: { info: () => undefined, warn: () => undefined, error: () => undefined },
+    log: {
+      info: () => undefined,
+      warn: () => undefined,
+      error: (...args: unknown[]) => {
+        errors.push(args);
+      },
+    },
     now: () => now,
     sent,
+    errors,
   };
 }
 
@@ -270,7 +282,9 @@ describe('drainOnce', () => {
     });
     const ctx = ctxWith(db.pool);
     const r = await drainOnce(ctx);
-    expect(r).toEqual({ processed: 2, failed: 1 });
+    expect(r).toEqual({ processed: 2, failed: 1, parked: 0 });
+    // Delivery order is the outbox id order, not reordered by attempt count (verification N4).
+    expect(db.calls[1]!.sql).toMatch(/ORDER BY id LIMIT/);
     const marked = db.calls
       .filter((c) => c.sql.includes('SET processed_at'))
       .map((c) => c.params[0]);
@@ -279,6 +293,20 @@ describe('drainOnce', () => {
     expect(sql).toContain('ROLLBACK TO SAVEPOINT ev');
     expect(sql[sql.length - 1]).toBe('COMMIT');
     expect(sql[0]).toBe('BEGIN');
+  });
+
+  it('reports a parked event distinctly once it reaches MAX_EVENT_ATTEMPTS (N4)', async () => {
+    const db = fakeDb({
+      events: [ev('content.published', { id: '20' })],
+      audience: [{ user_id: U1 }],
+      failNotifyFor: U1,
+      attemptsAfter: MAX_EVENT_ATTEMPTS,
+    });
+    const ctx = ctxWith(db.pool);
+    const r = await drainOnce(ctx);
+    expect(r).toEqual({ processed: 0, failed: 1, parked: 1 });
+    const parkedLog = ctx.errors.find((a) => String(a[1]).includes('parked'));
+    expect(parkedLog?.[0]).toMatchObject({ eventId: '20', attempts: MAX_EVENT_ATTEMPTS });
   });
 });
 

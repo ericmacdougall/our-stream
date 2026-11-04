@@ -10,7 +10,7 @@ import { readerVisibleSql } from '@our-stream/authz';
 import { Uuid } from '@our-stream/contracts';
 import { withTenant } from '@our-stream/db';
 import type { AppContext } from '../context.js';
-import { forbidden, notFound, unauthorized } from '../lib/errors.js';
+import { ApiError, forbidden, notFound, unauthorized } from '../lib/errors.js';
 import {
   cacheControlFor,
   classify,
@@ -32,12 +32,17 @@ interface Gate {
   visible: boolean;
 }
 
+const rateLimited = () => new ApiError(429, 'rate_limited', 'too many requests');
+
 export function registerMediaRoutes(fastify: FastifyInstance, ctx: AppContext): void {
   const app = fastify.withTypeProvider<ZodTypeProvider>();
 
   app.get(
     '/media/:contentId/:versionId/*',
     {
+      // tokenAuth: a request without a session is budgeted per verified token user below, not per
+      // address (native players behind carrier NAT share addresses).
+      config: { tokenAuth: true },
       schema: {
         tags: ['media'],
         params: Params,
@@ -62,10 +67,15 @@ export function registerMediaRoutes(fastify: FastifyInstance, ctx: AppContext): 
         orgId = req.auth.orgId;
       } else if (req.query.t) {
         token = parseMediaToken(req.query.t);
-        if (!token) throw forbidden('bad_token', 'invalid media token');
+        if (!token) {
+          // Malformed tokens count against the address.
+          if (!ctx.limits.ip.allow(req.ip)) throw rateLimited();
+          throw forbidden('bad_token', 'invalid media token');
+        }
         userId = token.userId;
         orgId = token.orgId;
       } else {
+        if (!ctx.limits.ip.allow(req.ip)) throw rateLimited();
         throw unauthorized();
       }
 
@@ -82,11 +92,14 @@ export function registerMediaRoutes(fastify: FastifyInstance, ctx: AppContext): 
         if (!g || g.retracted_at !== null) throw notFound('media_not_found', 'not found');
         if (g.current_version_id !== versionId || g.v_status !== 'current')
           throw notFound('media_not_found', 'not found');
-        if (
-          token &&
-          !mediaTokenValid(ctx.config.MEDIA_HMAC_SECRET, token, versionId, g.media_key_id)
-        )
-          throw forbidden('bad_token', 'invalid media token');
+        if (token) {
+          if (!mediaTokenValid(ctx.config.MEDIA_HMAC_SECRET, token, versionId, g.media_key_id)) {
+            if (!ctx.limits.ip.allow(req.ip)) throw rateLimited();
+            throw forbidden('bad_token', 'invalid media token');
+          }
+          // Verified: budget by the user the token was minted for.
+          if (!ctx.limits.media.allow(token.userId)) throw rateLimited();
+        }
         if (!g.visible) throw forbidden('forbidden', 'you cannot view this item');
       });
 

@@ -34,8 +34,16 @@ Cookie-authenticated mutations (anything but GET/HEAD/OPTIONS with a session coo
    deployments), or `Sec-Fetch-Site: same-origin` when the browser omits `Origin`.
 
 Otherwise the request is refused with 403 `csrf`. Bearer requests carry no ambient credential and are
-exempt. Sign-in routes have no session yet and are instead rate limited (`AUTH_RATE_LIMIT_MAX` per IP
-per minute; 429).
+exempt. Sign-in routes have no session yet and are instead rate limited per client address
+(`AUTH_RATE_LIMIT_MAX` per minute) and per normalised email (`AUTH_EMAIL_RATE_LIMIT_MAX`); authenticated
+requests are budgeted by the validated session id, requests without a session by address. All answer
+429 `rate_limited`. See "Proxies and rate limits" in `development.md` for what `TRUST_PROXY` must be
+for the address budgets to mean anything.
+
+Signing up with an address that already has an account, including a password-less account created by
+an invite, answers 409 `email_taken`: an unauthenticated request never claims an existing account.
+An invited user signs in through the emailed link and may then choose a password once with
+`POST /v1/auth/password` (`{password}`; 409 `password_set` when one exists).
 
 ## Magic links and invites
 
@@ -102,7 +110,8 @@ per minute; 429).
 `GET /media/{contentId}/{versionId}/{path}` maps `path` to
 `orgs/{org}/content/{content}/versions/{version}/derived/{path}` and, on **every** request:
 
-1. identifies the caller from the session (cookie or bearer) or, when absent, from `?t=<media token>`;
+1. identifies the caller from the session (cookie or bearer) or, when absent, from `?t=<media token>`
+   (token requests are budgeted per the user id the verified token carries, `MEDIA_RATE_LIMIT_MAX`);
 2. inside `withTenant` checks that the content exists and is not retracted (else 404), that
    `versionId` is `content.current_version_id` with `status = 'current'` (else 404), that a token's
    signature matches the content's current `media_key_id` (else 403), and that the caller passes
@@ -125,7 +134,8 @@ Worker contract: asset values in `content_version.assets` (`hls.master`, `poster
 `DATABASE_URL`, `APP_BASE_URL`, `TRUST_PROXY`, `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY`,
 `S3_SECRET_KEY`, `S3_FORCE_PATH_STYLE`, `SMTP_URL`, `MAIL_FROM`, `SESSION_SECRET`, `MEDIA_HMAC_SECRET`,
 `SESSION_TTL_DAYS`, `MAGIC_LINK_TTL_MINUTES`, `INVITE_LINK_TTL_DAYS`, `MEDIA_TOKEN_TTL_SECONDS`,
-`UPLOAD_URL_TTL_SECONDS`, `AUTH_RATE_LIMIT_MAX`. In production the process refuses to start with the
+`UPLOAD_URL_TTL_SECONDS`, `AUTH_RATE_LIMIT_MAX`, `AUTH_EMAIL_RATE_LIMIT_MAX`, `IP_RATE_LIMIT_MAX`,
+`SESSION_RATE_LIMIT_MAX`, `MEDIA_RATE_LIMIT_MAX`. In production the process refuses to start with the
 compose development defaults for `SESSION_SECRET`, `MEDIA_HMAC_SECRET` or `S3_SECRET_KEY`, with equal
 session and media secrets, or with a non-https `APP_BASE_URL`.
 

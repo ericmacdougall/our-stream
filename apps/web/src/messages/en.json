@@ -18,7 +18,7 @@
   "nav.streams": "Streams",
   "nav.upload": "Upload",
   "nav.notifications": "Notifications",
-  "nav.notificationsWithCount": "Notifications, {count, plural, one {# unread} other {# unread}}",
+  "nav.unread": "{count, plural, one {unread} other {unread}}",
   "nav.signOut": "Sign out",
 
   "auth.signIn.title": "Sign in",

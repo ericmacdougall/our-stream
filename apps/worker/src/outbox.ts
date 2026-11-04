@@ -212,15 +212,16 @@ export const MAX_EVENT_ATTEMPTS = 5;
 export async function drainOnce(
   ctx: JobContext,
   limit = 100,
-): Promise<{ processed: number; failed: number }> {
+): Promise<{ processed: number; failed: number; parked: number }> {
   const client = await ctx.platformPool.connect();
   let processed = 0;
   let failed = 0;
+  let parked = 0;
   try {
     await client.query('BEGIN');
     const r = await client.query<DomainEvent>(
       `SELECT id, org_id, type, subject_type, subject_id, version_id, payload
-         FROM platform.domain_event WHERE processed_at IS NULL AND attempts < $2 ORDER BY attempts, id LIMIT $1 FOR UPDATE SKIP LOCKED`,
+         FROM platform.domain_event WHERE processed_at IS NULL AND attempts < $2 ORDER BY id LIMIT $1 FOR UPDATE SKIP LOCKED`,
       [limit, MAX_EVENT_ATTEMPTS],
     );
     for (const ev of r.rows) {
@@ -237,11 +238,20 @@ export async function drainOnce(
         await client.query('ROLLBACK TO SAVEPOINT ev');
         // Count the attempt so a poison event cannot starve newer ones (F4); after MAX_EVENT_ATTEMPTS it
         // stays unprocessed with its last error for an operator to inspect.
-        await client.query(
-          'UPDATE platform.domain_event SET attempts = attempts + 1, last_error = left($2, 500) WHERE id = $1',
+        const upd = await client.query<{ attempts: number }>(
+          'UPDATE platform.domain_event SET attempts = attempts + 1, last_error = left($2, 500) WHERE id = $1 RETURNING attempts',
           [ev.id, (err as Error).message],
         );
         failed += 1;
+        const attempts = upd.rows[0]?.attempts ?? 0;
+        if (attempts >= MAX_EVENT_ATTEMPTS) {
+          parked += 1;
+          ctx.log.error(
+            { eventId: ev.id, orgId: ev.org_id, type: ev.type, attempts },
+            'outbox event parked after repeated failures; inspect last_error and reset attempts to requeue',
+          );
+          continue;
+        }
         ctx.log.error(
           { eventId: ev.id, orgId: ev.org_id, type: ev.type, err: (err as Error).message },
           'outbox event failed; will retry on the next drain',
@@ -255,7 +265,7 @@ export async function drainOnce(
   } finally {
     client.release();
   }
-  return { processed, failed };
+  return { processed, failed, parked };
 }
 
 export const outboxDrain: Handler = async (_data, ctx) => {

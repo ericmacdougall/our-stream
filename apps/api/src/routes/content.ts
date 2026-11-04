@@ -200,6 +200,8 @@ export function registerContentRoutes(fastify: FastifyInstance, ctx: AppContext)
       const loaded = await requireAuthor(client, contentId);
       if (loaded.detail.state === 'retracted')
         throw conflict('retracted', 'retracted content cannot receive uploads');
+      if (body.parts > Math.ceil(body.size / (5 * 1024 * 1024)) + 1)
+        throw badRequest('too_many_parts', 'part count does not match the file size');
       const versionId = randomUUID();
       const key = originalKey(auth.orgId, contentId, versionId, randomUUID());
       await client.query(
@@ -208,8 +210,6 @@ export function registerContentRoutes(fastify: FastifyInstance, ctx: AppContext)
         [auth.orgId, versionId, contentId, key, body.fileName, body.size, body.mimeType],
       );
       const uploadId = await ctx.store.createMultipartUpload(key, body.mimeType);
-      if (body.parts > Math.ceil(body.size / (5 * 1024 * 1024)) + 1)
-        throw badRequest('too_many_parts', 'part count does not match the file size');
       const partUrls = await Promise.all(
         Array.from({ length: body.parts }, (_, i) => i + 1).map(async (partNumber) => ({
           partNumber,

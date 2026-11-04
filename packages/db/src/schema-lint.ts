@@ -34,7 +34,7 @@ const APP_ALLOWED_FUNCTIONS = new Set([
   'platform_session_switch_org',
   'platform_magic_link_create',
   'platform_magic_link_consume',
-  'platform_memberships_of',
+  'platform_memberships_of_session',
   'platform_org_create',
   'platform_invite_accept',
   'platform_account_set_password_if_unset',
