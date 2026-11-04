@@ -149,10 +149,11 @@ describe.skipIf(!enabled)('digest, comment fan-out and maintenance (integration)
   });
 
   it('sends one digest per eligible member per day with permission-checked titles; a failed send is retried next run', async () => {
-    mailer.failNext(1); // the first send of the run fails: whichever member it is, it must be retried later
+    mailer.failNextTo(email('flaky')); // one member's send fails on the first run and must be retried later
     const first = await runDigest(ctx, day);
     expect(first.failed).toBeGreaterThanOrEqual(1);
     const sentTo = (name: string) => mailer.to(email(name));
+    expect(sentTo('flaky')).toHaveLength(0);
     expect(mine()).toHaveLength(2);
     const second = await runDigest(ctx, day);
     expect(second.retried).toBeGreaterThanOrEqual(1);
@@ -184,7 +185,8 @@ describe.skipIf(!enabled)('digest, comment fan-out and maintenance (integration)
       [ids.org],
     );
     expect(rows.map((r) => r.status)).toEqual(['sent', 'sent', 'sent']);
-    expect(rows.some((r) => r.attempts === 2)).toBe(true); // the retried one
+    expect(rows.find((r) => r.user_id === ids.flaky)!.attempts).toBe(2); // the retried one
+    expect(rows.find((r) => r.user_id === ids.flaky)!.last_error).toBeNull();
     expect(errors.some((e) => e.includes('digest send failed'))).toBe(true);
     const undigested = await q<{ n: number }>(
       `SELECT count(*)::int AS n FROM notification WHERE org_id = $1 AND digested_at IS NULL AND read_at IS NULL`,

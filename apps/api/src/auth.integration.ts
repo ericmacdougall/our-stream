@@ -207,7 +207,9 @@ describe.skipIf(!integrationReady)('auth (integration)', () => {
 
     const members = await h.call('GET', '/v1/members', owner);
     expect(members.status).toBe(200);
-    const list = members.body as Array<{ email: string; role: string }>;
+    // The frozen contract (m1a-paths.ts) wraps lists in { items } (GoodQA #35633).
+    const list = (members.body as { items: Array<{ email: string; role: string }> }).items;
+    expect(Array.isArray(members.body)).toBe(false);
     expect(list.map((m) => m.email)).toEqual(expect.arrayContaining([owner.email, member.email]));
 
     const again = await h.call('POST', '/v1/invites', owner, {
