@@ -132,7 +132,9 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
             ? 'internal'
             : rawCode === 'FST_ERR_VALIDATION'
               ? 'validation'
-              : (rawCode ?? 'bad_request'),
+              : status === 429
+                ? 'rate_limited' // @fastify/rate-limit errors carry no code (click-test finding 1)
+                : (rawCode ?? 'bad_request'),
         message: status >= 500 ? 'internal error' : (err as Error).message,
         requestId: String(req.id),
       },

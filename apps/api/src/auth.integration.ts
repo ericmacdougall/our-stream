@@ -371,7 +371,11 @@ describe.skipIf(!integrationReady)('auth (integration)', () => {
         });
       expect((await hit(1)).statusCode).toBe(200);
       expect((await hit(2)).statusCode).toBe(200);
-      expect((await hit(3)).statusCode).toBe(429);
+      const limited = await hit(3);
+      expect(limited.statusCode).toBe(429);
+      // The plugin's error has no code; the contract still says rate_limited (click-test finding 1).
+      expect(limited.json().error.code).toBe('rate_limited');
+      expect(limited.headers['retry-after']).toBeDefined();
     } finally {
       await app.close();
     }
