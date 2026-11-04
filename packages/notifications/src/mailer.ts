@@ -14,14 +14,24 @@ export interface Mailer {
   send(message: MailMessage): Promise<void>;
 }
 
-/** Records messages; `failNext(n)` makes the next n sends throw (digest retry tests). */
+/**
+ * Records messages; `failNext(n)` makes the next n sends throw, `failNextTo(address)` makes the next
+ * send to that address throw (deterministic digest retry tests when other orgs share the run).
+ */
 export class FakeMailer implements Mailer {
   readonly sent: MailMessage[] = [];
   private failures = 0;
+  private readonly failAddresses = new Set<string>();
   failNext(n: number): void {
     this.failures = n;
   }
+  failNextTo(address: string): void {
+    this.failAddresses.add(address);
+  }
   async send(message: MailMessage): Promise<void> {
+    if (this.failAddresses.delete(message.to)) {
+      throw new Error('fake mailer: simulated SMTP failure');
+    }
     if (this.failures > 0) {
       this.failures -= 1;
       throw new Error('fake mailer: simulated SMTP failure');

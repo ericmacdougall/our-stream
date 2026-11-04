@@ -66,5 +66,10 @@ describe('digest rendering', () => {
     await expect(f.send({ to: 'x', subject: 's', text: 't' })).rejects.toThrow(/simulated/);
     await f.send({ to: 'x', subject: 's', text: 't' });
     expect(f.to('x')).toHaveLength(1);
+    f.failNextTo('y');
+    await f.send({ to: 'x', subject: 's', text: 't' }); // other addresses unaffected
+    await expect(f.send({ to: 'y', subject: 's', text: 't' })).rejects.toThrow(/simulated/);
+    await f.send({ to: 'y', subject: 's', text: 't' });
+    expect(f.to('y')).toHaveLength(1);
   });
 });
