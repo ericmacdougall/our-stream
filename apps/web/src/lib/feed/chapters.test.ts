@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   activeChapterIndex,
+  canonicalTimestamp,
   formatTimestamp,
   normaliseChapters,
   parseTimestamp,
@@ -30,6 +31,32 @@ describe('formatTimestamp', () => {
     }
     expect(formatTimestamp(3_723_000)).toBe('1:02:03');
     expect(formatTimestamp(-5)).toBe('0:00');
+  });
+});
+
+describe('canonicalTimestamp', () => {
+  it('rewrites every accepted whole-second form into the display form viewers see', () => {
+    expect(canonicalTimestamp('00:02')).toBe('0:02');
+    expect(canonicalTimestamp('0:02')).toBe('0:02');
+    expect(canonicalTimestamp('2')).toBe('0:02');
+    expect(canonicalTimestamp(' 12:34 ')).toBe('12:34');
+    expect(canonicalTimestamp('01:02:03')).toBe('1:02:03');
+    expect(canonicalTimestamp('90')).toBe('1:30');
+  });
+  it('leaves fractional seconds alone rather than rounding them away', () => {
+    expect(canonicalTimestamp('0:07.5')).toBe('0:07.5');
+  });
+  it('leaves invalid or empty input untouched so the author can still fix it', () => {
+    expect(canonicalTimestamp('')).toBe('');
+    expect(canonicalTimestamp('abc')).toBe('abc');
+    expect(canonicalTimestamp('1:60')).toBe('1:60');
+  });
+  it('is idempotent and agrees with formatTimestamp', () => {
+    for (const ms of [0, 2_000, 65_000, 754_000, 3_723_000]) {
+      const shown = formatTimestamp(ms);
+      expect(canonicalTimestamp(shown)).toBe(shown);
+      expect(parseTimestamp(canonicalTimestamp(shown))).toBe(ms);
+    }
   });
 });
 

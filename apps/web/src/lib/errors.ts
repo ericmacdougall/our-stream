@@ -29,12 +29,18 @@ export function describeError(code: string | undefined, status?: number): string
   return t('error.generic');
 }
 
-/** openapi-fetch returns {data, error, response}; normalise into a message or null. */
+/**
+ * openapi-fetch returns {data, error, response}; normalise into a message or null. Success needs a
+ * 2xx status: openapi-fetch yields `error: undefined` for any empty-body response, including a
+ * 502/504 from a proxy, which must never read as success.
+ */
 export function errorMessage(result: {
   error?: unknown;
   response?: Response | { status: number };
 }): string | null {
-  if (result.error === undefined) return null;
+  const status = result.response?.status;
+  const ok = status === undefined || (status >= 200 && status < 300);
+  if (result.error === undefined && ok) return null;
   const code =
     result.error && typeof result.error === 'object' && 'error' in result.error
       ? (result.error as { error?: { code?: string } }).error?.code

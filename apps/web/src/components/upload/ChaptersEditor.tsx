@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
 import { useId } from 'react';
-import { parseTimestamp } from '@/lib/feed/chapters';
+import { canonicalTimestamp, parseTimestamp } from '@/lib/feed/chapters';
 import { t } from '@/lib/i18n';
 
 export interface ChapterDraft {
@@ -39,13 +39,18 @@ export function ChaptersEditor({
             <input
               id={`${baseId}-at-${c.key}`}
               className="time"
-              placeholder="mm:ss"
-              inputMode="numeric"
+              placeholder="m:ss"
+              inputMode="text"
               value={c.at}
               aria-invalid={invalid}
               aria-describedby={`${baseId}-hint`}
               disabled={disabled}
               onChange={(e) => update(c.key, { at: e.target.value })}
+              // Show the author exactly what viewers will see ("00:02" -> "0:02").
+              onBlur={(e) => {
+                const shown = canonicalTimestamp(e.target.value);
+                if (shown !== e.target.value) update(c.key, { at: shown });
+              }}
             />
             <label htmlFor={`${baseId}-title-${c.key}`} className="visually-hidden">
               {t('upload.chapterTitle', { n: i + 1 })}

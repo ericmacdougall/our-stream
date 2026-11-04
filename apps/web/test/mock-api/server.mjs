@@ -61,6 +61,8 @@ function readBody(req) {
 }
 
 function sendJson(res, status, body, extraHeaders = {}) {
+  // A handler may have deliberately dropped the connection (see /__mock/drop-next-response).
+  if (res.destroyed || res.socket?.destroyed) return;
   const payload = JSON.stringify(body);
   res.writeHead(status, {
     'content-type': 'application/json; charset=utf-8',
@@ -82,9 +84,12 @@ function sessionCookie(token) {
   return `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax`;
 }
 
-function me(user) {
+function me(user, currentSession) {
   const org = db.orgs.get(user.orgId);
-  const session = [...db.sessions.values()].find((s) => s.userId === user.id);
+  // The CSRF token belongs to the calling session; a person may hold several (another tab, an
+  // earlier link). Without one, fall back to the newest (Map keeps insertion order).
+  const session =
+    currentSession ?? [...db.sessions.values()].filter((s) => s.userId === user.id).pop();
   return {
     user: { id: user.id, email: user.email, displayName: user.displayName },
     org: org ? { id: org.id, slug: org.slug, name: org.name, role: user.role } : null,
@@ -341,7 +346,8 @@ route('POST', '/v1/auth/signup', async ({ body, res }) => {
 route('POST', '/v1/auth/login', async ({ body, res }) => {
   validate(str(body.email, 3) && str(body.password, 1), 'credentials');
   const user = [...db.users.values()].find((u) => u.email === body.email.toLowerCase());
-  if (!user || user.password !== body.password)
+  // A password-less account (created by an invite) can only sign in through its link.
+  if (!user || user.password === null || user.password !== body.password)
     throw new HttpError(401, 'invalid_credentials', 'invalid credentials');
   startSession(res, user);
   return me(user);
@@ -372,7 +378,23 @@ route('POST', '/v1/auth/logout', async ({ req, res }) => {
   res.setHeader('set-cookie', `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
   return { ok: true };
 });
-route('GET', '/v1/me', async ({ auth }) => me(auth.user));
+// Set by POST /__mock/drop-next-response: the next password set commits, then the socket is
+// destroyed without an answer, which is how a proxy or network failure after the API has already
+// stored the hash looks to the browser.
+let dropNextPasswordResponse = false;
+route('POST', '/v1/auth/password', async ({ auth, body, res }) => {
+  validate(str(body.password, 12, 256), 'password');
+  if (auth.user.password !== null)
+    throw new HttpError(409, 'password_set', 'this account already has a password');
+  auth.user.password = body.password;
+  if (dropNextPasswordResponse) {
+    dropNextPasswordResponse = false;
+    res.socket?.destroy();
+    return undefined;
+  }
+  return { ok: true };
+});
+route('GET', '/v1/me', async ({ auth }) => me(auth.user, auth.session));
 route('GET', '/v1/sync', async ({ auth }) => ({
   authzEpoch: auth.user.authzEpoch,
   orgContentEpoch: orgOf(auth.user).contentEpoch,
@@ -715,6 +737,43 @@ route('POST', '/__mock/reset', async () => {
   for (const m of Object.values(db)) m.clear();
   return { ok: true };
 });
+// Creates a password-less member of an existing org (what POST /v1/invites does on the real API) and
+// returns the magic token the e2e would otherwise read from a mailbox. Mock only: never built into the
+// web app, and the real API has no such route.
+route('POST', '/__mock/invitee', async ({ body }) => {
+  validate(
+    str(body.orgSlug, 2, 48) && str(body.email, 3, 254) && body.email.includes('@'),
+    'invitee',
+  );
+  const org = [...db.orgs.values()].find((o) => o.slug === body.orgSlug);
+  if (!org) throw new HttpError(404, 'not_found', 'no such org');
+  const email = body.email.toLowerCase();
+  // Re-inviting an existing password-less member just mints a new link (the real API upserts the
+  // invite row); an account that already has a password is never claimed this way.
+  let user = [...db.users.values()].find((u) => u.email === email);
+  if (user && (user.password !== null || user.orgId !== org.id))
+    throw new HttpError(409, 'email_taken');
+  if (!user) {
+    user = {
+      id: randomUUID(),
+      email,
+      displayName: str(body.displayName, 1, 120) ? body.displayName : 'Invitee',
+      password: null,
+      orgId: org.id,
+      role: 'member',
+      status: 'active',
+      authzEpoch: 1,
+    };
+    db.users.set(user.id, user);
+  }
+  const token = randomBytes(24).toString('hex');
+  db.magic.set(token, user.email);
+  return { userId: user.id, token };
+});
+route('POST', '/__mock/drop-next-response', async () => {
+  dropNextPasswordResponse = true;
+  return { ok: true };
+});
 route('GET', '/__mock/state', async () => ({
   users: db.users.size,
   content: db.content.size,
@@ -730,6 +789,8 @@ const PUBLIC = new Set([
   '/v1/auth/logout',
   '/__mock/reset',
   '/__mock/state',
+  '/__mock/invitee',
+  '/__mock/drop-next-response',
   '/health',
   '/v1/meta',
 ]);

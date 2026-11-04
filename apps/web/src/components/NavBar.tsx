@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { browserApi } from '@/lib/api/client';
 import { clearAllCaches } from '@/lib/caches';
+import { errorMessage } from '@/lib/errors';
 import { t } from '@/lib/i18n';
 import { useSession } from './SessionProvider';
 
@@ -16,6 +17,7 @@ export function NavBar() {
   const router = useRouter();
   const [unread, setUnread] = useState<number | null>(null);
   const [signingOut, setSigningOut] = useState(false);
+  const [signOutFailed, setSignOutFailed] = useState(false);
 
   const refreshUnread = useCallback(async () => {
     try {
@@ -43,13 +45,24 @@ export function NavBar() {
   async function signOut() {
     if (signingOut) return;
     setSigningOut(true);
+    setSignOutFailed(false);
+    // Navigate only when the server really ended the session: /sign-in now bounces a still-valid
+    // session straight back to the feed, which on a shared machine would look like a sign-out.
+    let ended: boolean;
     try {
-      await browserApi().POST('/v1/auth/logout');
-    } finally {
-      await clearAllCaches();
-      router.push('/sign-in');
-      router.refresh();
+      const result = await browserApi().POST('/v1/auth/logout');
+      ended = result.response.status === 401 || errorMessage(result) === null;
+    } catch {
+      ended = false;
     }
+    if (!ended) {
+      setSignOutFailed(true);
+      setSigningOut(false);
+      return;
+    }
+    await clearAllCaches();
+    router.push('/sign-in');
+    router.refresh();
   }
 
   const links: { href: string; label: string }[] = [
@@ -93,10 +106,18 @@ export function NavBar() {
           </li>
         </ul>
         <div className="topnav-user">
-          <span className="muted">{me.user.displayName}</span>
+          <Link href="/account" aria-current={pathname === '/account' ? 'page' : undefined}>
+            <span className="visually-hidden">{t('nav.account')}: </span>
+            {me.user.displayName}
+          </Link>
           <button type="button" onClick={() => void signOut()} disabled={signingOut}>
             {t('nav.signOut')}
           </button>
+          {signOutFailed ? (
+            <span role="alert" className="notice notice-error" data-testid="sign-out-failed">
+              {t('nav.signOutFailed')}
+            </span>
+          ) : null}
         </div>
       </nav>
     </header>

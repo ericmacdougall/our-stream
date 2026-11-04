@@ -46,4 +46,22 @@ test('sign-in, upload and feed have no serious accessibility violations', async 
   await expectNoSeriousViolations(page, 'content');
   await page.goto('/notifications');
   await expectNoSeriousViolations(page, 'notifications');
+
+  // Account page: the form, then the settled outcome (this owner already has a password).
+  await page.goto('/account');
+  await page.screenshot({ path: test.info().outputPath('account.png'), fullPage: true });
+  await expectNoSeriousViolations(page, 'account');
+  // Keyboard order: heading -> new password -> show toggle -> confirm -> submit.
+  await page.getByLabel('New password', { exact: true }).focus();
+  await page.keyboard.press('Tab');
+  await expect(page.getByLabel('Show password')).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(page.getByLabel('Confirm new password')).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(page.getByRole('button', { name: 'Set password' })).toBeFocused();
+  await page.getByLabel('New password', { exact: true }).fill(account.password);
+  await page.getByLabel('Confirm new password').fill(account.password);
+  await page.getByRole('button', { name: 'Set password' }).click();
+  await expect(page.getByTestId('password-outcome')).toHaveAttribute('data-outcome', 'alreadySet');
+  await expectNoSeriousViolations(page, 'account-settled');
 });

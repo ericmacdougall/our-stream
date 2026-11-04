@@ -2,6 +2,7 @@
 // Password strength hint. The contract's floor is 12 characters; the hint rewards length first
 // (NIST SP 800-63B) and only then character variety. Never blocks beyond the contract minimum.
 export const PASSWORD_MIN = 12;
+export const PASSWORD_MAX = 256;
 
 export type PasswordStrength = 'tooShort' | 'weak' | 'fair' | 'strong';
 

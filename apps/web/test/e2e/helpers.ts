@@ -67,8 +67,10 @@ export async function uploadClip(page: Page, title: string, options: { chapter?:
   await page.getByLabel('Description').fill(`Description for ${title}`);
   if (options.chapter) {
     await page.getByRole('button', { name: 'Add chapter' }).click();
+    // Both "00:02" and "0:02" are accepted; on blur the field shows the form viewers will see.
     await page.getByLabel('Chapter 1 time').fill('00:02');
     await page.getByLabel('Chapter 1 title').fill('Second chapter');
+    await expect(page.getByLabel('Chapter 1 time')).toHaveValue('0:02');
   }
   await page.getByLabel('Video or audio file').setInputFiles(FIXTURE_MP4);
   await page.getByRole('button', { name: 'Create and upload' }).click();

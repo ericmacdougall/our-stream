@@ -34,15 +34,18 @@ API_INTERNAL_URL=http://localhost:4000 pnpm --filter @our-stream/web dev
 
 Mock knobs: `MOCK_MEDIA=hls|mp4|webm` (default auto: HLS when ffmpeg is on PATH, else `tiny.mp4`),
 `MOCK_PROCESSING_MS` (per processing step, default 300). Magic links are printed to the mock's
-stderr.
+stderr. Test hooks (mock only, never part of the web build): `POST /__mock/reset`, `GET /__mock/state`,
+`POST /__mock/invitee {orgSlug, email, displayName?}` creates a password-less member and returns the
+magic token the e2e would otherwise read from a mailbox; `POST /__mock/drop-next-response` makes the
+next `/v1/auth/password` commit and then drop the socket (a lost response after the server stored it).
 
 ## Test
 
 ```sh
-pnpm --filter @our-stream/web test        # vitest: feed keyboard reducer, cursor merge, chapters, settings, SW rules, schedule
+pnpm --filter @our-stream/web test        # vitest: feed keyboard reducer, cursor merge, chapters, settings, SW rules, schedule, safe-next, auth redirect, set-password
 pnpm --filter @our-stream/web typecheck
 pnpm --filter @our-stream/web exec playwright install --with-deps chromium
-pnpm --filter @our-stream/web test:e2e    # builds the app, starts the mock, runs flow/keyboard/a11y specs
+pnpm --filter @our-stream/web test:e2e    # builds the app, starts the mock, runs flow/keyboard/a11y/auth/account specs
 E2E_API_URL=http://localhost:4000 pnpm --filter @our-stream/web test:e2e   # same suite against a real API
 ```
 
@@ -53,7 +56,19 @@ installed Chrome when the bundled Chromium lacks H.264. Reports land in `playwri
 ## Routes
 
 `/` feed (default landing), `/sign-in`, `/sign-up`, `/magic?token=`, `/streams`, `/streams/[id]`,
-`/upload`, `/content/[id]`, `/content/[id]/publish`, `/notifications`.
+`/upload`, `/content/[id]`, `/content/[id]/publish`, `/notifications`, `/account`.
+
+`/sign-in` and `/sign-up` check the session server-side (`getMe`) and redirect a signed-in visitor to
+`/` or the same-origin `?next` target (`src/lib/auth-redirect.ts`; auth pages and non-page paths such
+as `/api` map to `/`). A stale cookie renders the form, so nothing loops. `/magic` is never redirected
+so an invite link for another organisation can still be consumed.
+
+`/account` shows who is signed in and offers the one-time set-password form for accounts created from
+an invitation (`POST /v1/auth/password`). A 409 `password_set` is shown as a settled outcome. Success
+needs a 2xx; a thrown fetch, an empty-body failure or any 5xx counts as "outcome unknown": the typed
+value is frozen and can only be resent unchanged or abandoned with a warning, because there is no
+reset flow yet (`src/lib/account/set-password.ts`). Sign-out navigates only after the server ended
+the session, since `/sign-in` would otherwise bounce a live session straight back to the feed.
 
 ## Routes the web app expects from the API
 
@@ -68,6 +83,7 @@ mutations carry `x-csrf-token`; auth routes are the only unauthenticated ones.
 | POST        | `/v1/auth/magic-link`              | MagicLinkRequest → Ok (always)                           |
 | POST        | `/v1/auth/magic-link/consume`      | MagicLinkConsumeRequest → Me (+ session cookie)          |
 | POST        | `/v1/auth/logout`                  | – → Ok (clears cookie)                                   |
+| POST        | `/v1/auth/password`                | SetPasswordRequest → Ok (409 `password_set` once set)    |
 | GET         | `/v1/me`                           | – → Me                                                   |
 | GET         | `/v1/sync`                         | – → SyncResponse                                         |
 | GET         | `/v1/members`                      | – → `{ items: MemberSummary[] }`                         |

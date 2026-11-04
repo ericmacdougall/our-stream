@@ -28,7 +28,8 @@ test('publish a clip, watch it in the feed, retract it everywhere', async ({ pag
   const item = feedItem(page, contentId);
   await expect(item).toBeVisible();
   await expect(item.getByRole('heading', { name: 'Welcome clip' })).toBeVisible();
-  await expect(item.getByRole('button', { name: /Second chapter/ })).toBeVisible();
+  // The feed shows the chapter time in the same form the upload form settled on.
+  await expect(item.getByRole('button', { name: '0:02 Second chapter' })).toBeVisible();
   const video = item.getByTestId('feed-video');
   const codecs = await video.evaluate((v: HTMLVideoElement) => ({
     h264: v.canPlayType('video/mp4; codecs="avc1.42E01E, mp4a.40.2"'),
@@ -53,6 +54,7 @@ test('publish a clip, watch it in the feed, retract it everywhere', async ({ pag
   // Retract: Escape keeps it, confirming removes it.
   await page.goto(`/content/${contentId}`);
   await expect(page.getByTestId('content-state')).toHaveText('Published');
+  await expect(page.getByText('0:02 Second chapter')).toBeVisible();
   await page.getByRole('button', { name: 'Retract', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Retract this clip?' });
   await expect(dialog).toBeVisible();

@@ -37,6 +37,17 @@ export function formatTimestamp(ms: number): string {
   return `${h > 0 ? `${h}:` : ''}${mm}:${String(s).padStart(2, '0')}`;
 }
 
+/**
+ * The display form of what the author typed ("00:02" or "2" -> "0:02") so the upload form shows the
+ * same text viewers see in the feed. Fractional seconds would be floored by formatTimestamp, so they
+ * are left as typed; invalid input is returned unchanged for the author to fix.
+ */
+export function canonicalTimestamp(input: string): string {
+  const ms = parseTimestamp(input);
+  if (ms === null || ms % 1000 !== 0) return input;
+  return formatTimestamp(ms);
+}
+
 /** Index of the chapter active at `currentMs`, or -1 before the first chapter. */
 export function activeChapterIndex(chapters: readonly ChapterLike[], currentMs: number): number {
   let index = -1;

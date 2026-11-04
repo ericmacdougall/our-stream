@@ -43,7 +43,11 @@ for the address budgets to mean anything.
 Signing up with an address that already has an account, including a password-less account created by
 an invite, answers 409 `email_taken`: an unauthenticated request never claims an existing account.
 An invited user signs in through the emailed link and may then choose a password once with
-`POST /v1/auth/password` (`{password}`; 409 `password_set` when one exists).
+`POST /v1/auth/password` (`{password}`; 409 `password_set` when one exists). Client note: the web app
+offers this on `/account`; because `Me` carries no "has password" flag, the form is shown to everyone
+and the 409 is presented as a settled outcome. There is no reset endpoint, so a client must never let
+a person believe a different password was stored than the one the server kept: after a lost response
+the web app resends the identical value or abandons it with a warning.
 
 ## Magic links and invites
 

@@ -23,4 +23,23 @@ describe('safeNext', () => {
       expect(safeNext(bad), String(bad)).toBe('/');
     }
   });
+  it('refuses same-origin non-page targets (API, media, build assets, service worker)', () => {
+    for (const bad of [
+      '/api/v1/me',
+      '/api',
+      '/media/x/hls/master.m3u8',
+      '/_next/static/chunk.js',
+      '/sw.js',
+      '/manifest.webmanifest',
+      '/api?x=1',
+      '/API/v1/me',
+      '/Media/x',
+      '/sw.js/',
+    ]) {
+      expect(safeNext(bad), bad).toBe('/');
+    }
+    // Pages whose names merely start with those letters are still fine.
+    expect(safeNext('/apiary')).toBe('/apiary');
+    expect(safeNext('/mediation')).toBe('/mediation');
+  });
 });

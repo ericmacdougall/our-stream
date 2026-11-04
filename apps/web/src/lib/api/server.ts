@@ -2,6 +2,7 @@
 // Data Access Layer (ADR-0011): server components and route handlers reach the API only through
 // this module. It forwards the incoming session cookie and never caches personalised responses.
 import 'server-only';
+import { cache } from 'react';
 import { cookies } from 'next/headers';
 import { createClient, type ApiClient } from '@our-stream/contracts';
 import { SESSION_COOKIE } from '@/proxy';
@@ -28,8 +29,11 @@ export async function serverApi(): Promise<ApiClient> {
 
 export type Me = NonNullable<Awaited<ReturnType<typeof getMe>>>;
 
-/** The signed-in user, or null when there is no valid session (401) or the API is unreachable. */
-export async function getMe() {
+/**
+ * The signed-in user, or null when there is no valid session (401) or the API is unreachable.
+ * Memoised per request (React cache) so the layout and a page share one GET /v1/me.
+ */
+export const getMe = cache(async () => {
   const jar = await cookies();
   if (!jar.has(SESSION_COOKIE)) return null;
   try {
@@ -39,4 +43,4 @@ export async function getMe() {
   } catch {
     return null;
   }
-}
+});
