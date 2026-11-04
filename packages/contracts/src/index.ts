@@ -42,4 +42,5 @@ export const ContentKind = z.enum(['clip', 'audio', 'document', 'page', 'link'])
 export const ContentState = z.enum(['draft', 'published', 'retracted']);
 export const EventTag = z.enum(['onboarding', 'announcement', 'current-events', 'training']);
 
+export * from './m1a.js';
 export { createClient } from './client.js';

@@ -21,6 +21,22 @@ const APP_ALLOWED_FUNCTIONS = new Set([
   'authz_groups_of_user',
   'platform_emit_event',
   'org_epoch_seq_name',
+  // M1a definer functions (migration 0002)
+  'content_publish',
+  'content_retract',
+  'record_view',
+  'platform_account_create',
+  'platform_account_by_email',
+  'platform_account_get',
+  'platform_session_create',
+  'platform_session_lookup',
+  'platform_session_revoke',
+  'platform_session_switch_org',
+  'platform_magic_link_create',
+  'platform_magic_link_consume',
+  'platform_memberships_of',
+  'platform_org_create',
+  'platform_invite_accept',
 ]);
 
 export async function lintSchema(
@@ -76,6 +92,8 @@ export async function lintSchema(
       }
     }
 
+    const tenantTableNames = tables.rows.map((t) => t.relname).filter((n) => n !== 'org');
+
     const matviews = await client.query<{ matviewname: string }>(
       `SELECT matviewname FROM pg_matviews WHERE schemaname = 'public'`,
     );
@@ -100,13 +118,29 @@ export async function lintSchema(
     for (const f of fns.rows) {
       // Guard detection is textual by design: it enforces that every such function states its org
       // precondition explicitly; the fixture matrix proves the behaviour.
-      const guarded = /RAISE EXCEPTION '[^']*org (required|context)/i.test(f.prosrc);
-      if (!guarded)
+      // Convention: a tenant-touching function raises "...org required" / "...org context"; a platform-scope
+      // function declares itself with "platform-scope" and may not reference any tenant table.
+      const orgGuard = /RAISE EXCEPTION '[^']*(org required|org context|cross-org by design)/i.test(
+        f.prosrc,
+      );
+      const platformScope = /RAISE EXCEPTION '[^']*platform-scope/i.test(f.prosrc);
+      if (!orgGuard && !platformScope) {
         findings.push({
           object: f.proname,
           problem:
-            'trigger/definer function has no explicit org guard (RAISE EXCEPTION ... org required)',
+            'trigger/definer function has no explicit org guard or platform-scope declaration',
         });
+      }
+      if (platformScope && !orgGuard) {
+        const touched = tenantTableNames.filter((t) =>
+          new RegExp(`\\b${t}\\b`, 'i').test(f.prosrc),
+        );
+        if (touched.length > 0)
+          findings.push({
+            object: f.proname,
+            problem: `platform-scope function references tenant tables: ${touched.join(', ')}`,
+          });
+      }
       if (f.prosecdef && !(f.proconfig ?? []).some((c) => c.startsWith('search_path='))) {
         findings.push({
           object: f.proname,
