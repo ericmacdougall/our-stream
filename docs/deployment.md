@@ -72,9 +72,10 @@ to the api host port, straight to the web container or straight to the api conta
 one client spending `AUTH_RATE_LIMIT_MAX` gets 429 while a second client on another address still gets 401;
 and the same probe with a deliberately misconfigured `TRUST_PROXY=true` never reaches 429.
 
-Known gap (not F2): presigned upload URLs are built from `S3_ENDPOINT` (`http://storage:8333` inside
-compose), which a browser cannot resolve. Browser uploads from the compose stack need a browser-reachable
-S3 endpoint; the API owner tracks a separate public endpoint setting.
+Browser uploads: presigned upload-part URLs are signed against `S3_PUBLIC_ENDPOINT`
+(`http://localhost:${S3_PORT}` in compose, the storage service's loopback port), while api and worker keep
+using the internal `S3_ENDPOINT`. The API setting lands with the M1b API branch; until then the compose
+value is ignored and uploads from a browser need the API started with a host-reachable `S3_ENDPOINT`.
 
 ## Kubernetes (Helm)
 
@@ -94,8 +95,9 @@ What the chart deploys:
 - Deployments `api`, `web`, `worker` with requests/limits, non-root pods (`runAsNonRoot`, uid 1000,
   seccomp `RuntimeDefault`, all capabilities dropped, no privilege escalation, read-only root filesystem
   with emptyDirs for `/tmp`, the web `.next/cache` and the worker scratch space). Probes: api readiness
-  `GET /health` (database-dependent) and TCP liveness; web `GET /sign-in`; the worker has none because it
-  exposes no health endpoint yet.
+  `GET /health` (database-dependent) and TCP liveness; web `GET /sign-in`; worker startup and liveness on
+  its `GET /health` (`WORKER_HEALTH_PORT` 4001, 200 while pg-boss is up and the outbox drains; this
+  endpoint lands with the M1b API branch, so the probe is unverified until that branch is merged).
 - A `migrate` Job (`node dist/cli.js migrate` from the api image) as a `pre-install,pre-upgrade` hook. It
   is the only workload that receives `DATABASE_ADMIN_URL`, waits for the database port, and runs with the
   namespace's default ServiceAccount because hooks run before the chart's own ServiceAccount exists.

@@ -66,6 +66,7 @@ expect_failure "trustedProxyCidrs=0.0.0.0/0" trustedProxyCidrs -- helm template 
 expect_failure "trustedProxyCidrs=10.0.0.1" trustedProxyCidrs -- helm template our-stream "$CHART" --set 'api.trustedProxyCidrs={10.0.0.1}'
 expect_failure "api.env.SESSION_SECRET" SESSION_SECRET -- helm template our-stream "$CHART" --set 'api.env.SESSION_SECRET=x'
 expect_failure "scratch below 2x max input" scratch -- helm template our-stream "$CHART" --set 'worker.scratch.sizeLimit=1Gi'
+expect_failure "empty ingressNamespaceSelector" ingressNamespaceSelector -- helm template our-stream "$CHART" --set 'networkPolicy.ingressNamespaceSelector=null'
 # a rendering that violates the invariants is rejected for each reason it violates
 for needle in privileged hostNetwork DATABASE_ADMIN_URL TRUST_PROXY runAsNonRoot 'development secret' envFrom 'expected 1 x Job'; do
   expect_failure "bad-rendered.yaml ($needle)" "$needle" -- python3 "$ASSERT" --expect Deployment=1 --expect Job=1 "$CHART/ci/fixtures/bad-rendered.yaml"

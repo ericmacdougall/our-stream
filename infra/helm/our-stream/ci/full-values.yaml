@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # CI rendering with every optional template enabled. Placeholder names only; no credentials.
 appBaseUrl: https://stream.example.test
+objectStorage:
+  publicEndpoint: https://uploads.example.test
 api:
   trustedProxyCidrs: ['10.244.0.0/16', 'fd00:10:244::/48']
   autoscaling:

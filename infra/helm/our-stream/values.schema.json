@@ -134,6 +134,10 @@
             "type": "string",
             "pattern": "^https?://[^/]+$"
           }
+        },
+        "publicEndpoint": {
+          "type": "string",
+          "pattern": "^$|^https?://"
         }
       },
       "required": ["endpoint", "region", "bucket", "forcePathStyle"]
@@ -364,10 +368,17 @@
           "type": "boolean"
         },
         "ingressNamespaceSelector": {
-          "type": "object"
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "string"
+          }
         },
         "ingressPodSelector": {
-          "type": "object"
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
         }
       },
       "required": ["enabled"]

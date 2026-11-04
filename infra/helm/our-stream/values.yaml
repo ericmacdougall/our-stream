@@ -35,6 +35,9 @@ objectStorage:
   # S3-compatible endpoint. Browsers upload parts directly to it (presigned URLs), so it must be reachable from
   # users' browsers as well as from the pods, and it must allow the `corsOrigins` below.
   endpoint: https://s3.example.com
+  # Optional browser-facing endpoint used only to sign upload-part URLs (S3_PUBLIC_ENDPOINT); empty means
+  # `endpoint`, which then has to be reachable by browsers itself.
+  publicEndpoint: ''
   region: us-east-1
   bucket: ourstream
   forcePathStyle: true
@@ -167,8 +170,10 @@ networkPolicy:
   # Default-deny ingress for every pod of the release; web accepts only the ingress controller, api only web.
   # Egress is not restricted by this skeleton.
   enabled: true
-  # Selects the namespace(s) the ingress controller runs in, e.g. {kubernetes.io/metadata.name: ingress-nginx}.
-  ingressNamespaceSelector: {}
+  # Selects the namespace the ingress controller (or Gateway data plane) runs in. Must not be empty: an empty
+  # selector would match every namespace, so the template refuses it.
+  ingressNamespaceSelector:
+    kubernetes.io/metadata.name: ingress-nginx
   # Optionally narrow to the controller's pods, e.g. {app.kubernetes.io/name: ingress-nginx}.
   ingressPodSelector: {}
 

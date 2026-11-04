@@ -5,6 +5,9 @@
 # from the ingress controller, api additionally from web (its rewrites, used by `next dev` and SSR). The
 # CNI must enforce NetworkPolicy for this to hold (kindnet and plain flannel do not). Egress is left open
 # (external Postgres, object storage, SMTP, ASR sidecars); tighten it per cluster.
+{{- if not .Values.networkPolicy.ingressNamespaceSelector }}
+{{- fail "networkPolicy.ingressNamespaceSelector must name the ingress controller's namespace (an empty selector would admit every namespace)" }}
+{{- end }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
