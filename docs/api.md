@@ -96,6 +96,12 @@ An invited user signs in through the emailed link and may then choose a password
   Events: `content.published` when `publishAt` is null or past, otherwise `content.scheduled`
   `{publishAt, expiresAt}`; plus `content.expiry_scheduled` `{expiresAt}` when an expiry is set. Publishing
   requires an uploaded version (409 `no_media`) and is refused for retracted items.
+  Publishing is idempotent: on an already-published item the request keeps `publish_at` unless it sets
+  `publishAt`, and a request whose audience and schedule equal the current ones writes nothing and emits
+  nothing (a retry or double submit never reorders the feed or notifies the audience twice). A wider
+  audience on a live item re-emits `content.published` (the worker's per-version, per-recipient dedupe
+  keeps earlier recipients at one notice); a narrowed audience emits nothing; a changed `publishAt` or
+  `expiresAt` emits `content.scheduled` / `content.expiry_scheduled` as on first publish.
 - Retract: `POST /v1/content/:id/retract` calls `content_retract` (versions become `retracted`,
   `media_key_id` rotates) and emits `content.retracted` with the version that was current.
 - `POST /v1/content/:id/view` records a view with `record_view` only for the current version of a

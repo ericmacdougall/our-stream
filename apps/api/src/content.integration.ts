@@ -297,6 +297,60 @@ describe.skipIf(!integrationReady)('content, publish rules and feed (integration
     expect(edited.contentEpoch).toBeGreaterThan(asViewer.contentEpoch);
   });
 
+  it('publishing again is idempotent: unchanged audience and schedule write nothing and emit nothing; a wider audience emits once', async () => {
+    const { contentId } = await createPlayableContent(h, contributor, 'Idempotent');
+    const events = async (type: string) =>
+      (
+        await h.admin.query<{ n: number }>(
+          `SELECT count(*)::int AS n FROM platform.domain_event WHERE subject_id = $1 AND type = $2`,
+          [contentId, type],
+        )
+      ).rows[0]!.n;
+    const body = { audience: [{ type: 'stream', streamId: dept }] };
+    const first = await h.call('POST', `/v1/content/${contentId}/publish`, contributor, body);
+    expect(first.status).toBe(200);
+    const publishedAt = (first.body as { publishAt: string; contentEpoch: number }).publishAt;
+    const epoch = (first.body as { contentEpoch: number }).contentEpoch;
+    expect(await events('content.published')).toBe(1);
+
+    // Same request again (a retry or a double submit): same answer, no new publish_at, no new event.
+    const again = await h.call('POST', `/v1/content/${contentId}/publish`, contributor, body);
+    expect(again.status).toBe(200);
+    expect((again.body as { publishAt: string }).publishAt).toBe(publishedAt);
+    expect((again.body as { contentEpoch: number }).contentEpoch).toBe(epoch);
+    expect(await events('content.published')).toBe(1);
+
+    // Widening the audience keeps publish_at and emits content.published once more (the worker's
+    // per-version dedupe keeps earlier recipients at one notice); narrowing emits nothing.
+    const wider = await h.call('POST', `/v1/content/${contentId}/publish`, contributor, {
+      audience: [
+        { type: 'stream', streamId: dept },
+        { type: 'user', userId: outsider.userId },
+      ],
+    });
+    expect(wider.status).toBe(200);
+    expect((wider.body as { publishAt: string }).publishAt).toBe(publishedAt);
+    expect((wider.body as { audience: unknown[] }).audience).toHaveLength(2);
+    expect(await events('content.published')).toBe(2);
+    expect((await feedIds(h, outsider)).ids.has(contentId)).toBe(true);
+    const narrower = await h.call('POST', `/v1/content/${contentId}/publish`, contributor, body);
+    expect(narrower.status).toBe(200);
+    expect(await events('content.published')).toBe(2);
+    expect((await feedIds(h, outsider)).ids.has(contentId)).toBe(false);
+
+    // A new expiry is a schedule change: publish_at still unchanged, one expiry_scheduled event.
+    const expiresAt = new Date(Date.now() + 3_600_000).toISOString();
+    const expiring = await h.call('POST', `/v1/content/${contentId}/publish`, contributor, {
+      ...body,
+      expiresAt,
+    });
+    expect(expiring.status).toBe(200);
+    expect((expiring.body as { publishAt: string; expiresAt: string }).publishAt).toBe(publishedAt);
+    expect((expiring.body as { expiresAt: string }).expiresAt).toBe(expiresAt);
+    expect(await events('content.expiry_scheduled')).toBe(1);
+    expect(await events('content.published')).toBe(2);
+  });
+
   it('scheduled items are absent before publish_at and appear once it passes; events are emitted', async () => {
     const { contentId, versionId } = await createPlayableContent(h, contributor, 'Scheduled');
     const publishAt = new Date(Date.now() + 3_600_000).toISOString();

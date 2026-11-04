@@ -353,39 +353,66 @@ export function registerContentRoutes(fastify: FastifyInstance, ctx: AppContext)
           [auth.orgId, contentId],
         );
         const have = new Set(existing.rows.map(tupleKey));
+        const added = [...desired].filter(([key]) => !have.has(key));
+        const removed = existing.rows.filter((row) => !desired.has(tupleKey(row)));
+
+        // Idempotent re-publish: an already-published item keeps its publish_at unless the request
+        // sets one, and a request that changes neither audience nor schedule writes nothing and emits
+        // nothing (a retry or a double submit must not reorder the feed or notify the audience twice).
+        const wasPublished = loaded.detail.state === 'published';
+        const currentPublishAt = loaded.detail.publishAt ? new Date(loaded.detail.publishAt) : null;
+        const currentExpiresAt = loaded.detail.expiresAt ? new Date(loaded.detail.expiresAt) : null;
+        const effectivePublishAt = publishAt ?? (wasPublished ? currentPublishAt : null);
+        const sameInstant = (a: Date | null, b: Date | null) =>
+          (a === null && b === null) || (a !== null && b !== null && a.getTime() === b.getTime());
+        const scheduleChanged =
+          !wasPublished ||
+          !sameInstant(effectivePublishAt, currentPublishAt) ||
+          !sameInstant(expiresAt, currentExpiresAt);
+        if (wasPublished && added.length === 0 && removed.length === 0 && !scheduleChanged) {
+          return loaded.detail;
+        }
+
         try {
-          for (const [key, tuple] of desired) if (!have.has(key)) await writeTuple(client, tuple);
-          for (const row of existing.rows) {
-            if (!desired.has(tupleKey(row)))
-              await deleteTuple(client, {
-                objectType: 'content',
-                objectId: contentId,
-                relation: 'viewer',
-                ...row,
-              });
-          }
+          for (const [, tuple] of added) await writeTuple(client, tuple);
+          for (const row of removed)
+            await deleteTuple(client, {
+              objectType: 'content',
+              objectId: contentId,
+              relation: 'viewer',
+              ...row,
+            });
         } catch (err) {
           throw fromAuthzError(err);
         }
-        try {
-          await client.query('SELECT content_publish($1, $2, $3)', [
-            contentId,
-            publishAt,
-            expiresAt,
-          ]);
-        } catch (err) {
-          throw fromDbError(err);
+        if (scheduleChanged) {
+          try {
+            await client.query('SELECT content_publish($1, $2, $3)', [
+              contentId,
+              effectivePublishAt,
+              expiresAt,
+            ]);
+          } catch (err) {
+            throw fromDbError(err);
+          }
         }
-        const immediate = !publishAt || publishAt.getTime() <= Date.now();
-        if (immediate) {
-          await emit(client, 'content.published', contentId, loaded.currentVersionId, {});
-        } else {
+        // Events: a first publish announces as before. On an already-published item, only a wider
+        // audience on a live item re-emits content.published (the worker dedupes per version and
+        // recipient, so earlier recipients get no second notice); a narrowed audience emits nothing;
+        // a changed schedule emits its scheduling events.
+        const liveNow = !effectivePublishAt || effectivePublishAt.getTime() <= Date.now();
+        const publishAtChanged =
+          !wasPublished || !sameInstant(effectivePublishAt, currentPublishAt);
+        if (liveNow) {
+          if (!wasPublished || added.length > 0)
+            await emit(client, 'content.published', contentId, loaded.currentVersionId, {});
+        } else if (publishAtChanged) {
           await emit(client, 'content.scheduled', contentId, loaded.currentVersionId, {
-            publishAt: publishAt.toISOString(),
+            publishAt: effectivePublishAt.toISOString(),
             expiresAt: expiresAt?.toISOString() ?? null,
           });
         }
-        if (expiresAt) {
+        if (expiresAt && (!wasPublished || !sameInstant(expiresAt, currentExpiresAt))) {
           await emit(client, 'content.expiry_scheduled', contentId, loaded.currentVersionId, {
             expiresAt: expiresAt.toISOString(),
           });
