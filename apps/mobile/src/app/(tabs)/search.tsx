@@ -113,7 +113,7 @@ export default function SearchScreen() {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={`${item.title}, ${strings.feed.by(item.owner.displayName)}`}
-              accessibilityHint="Opens the clip"
+              accessibilityHint={t.openHint}
               onPress={() => open(item, item.snippets.find((s) => s.tMs !== null)?.tMs ?? null)}
               style={({ pressed }) => [pressed && styles.pressed]}
             >

@@ -30,6 +30,8 @@ export default function MagicScreen() {
   const [pending, setPending] = useState(hasPendingMagicLink());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** A consumed link for another account while a session exists: the user decides which to keep. */
+  const [incoming, setIncoming] = useState<{ secret: string; me: Me } | null>(null);
 
   useEffect(() => {
     // Expo Router parses deep links itself; move a token it captured into the memory slot and strip
@@ -72,6 +74,11 @@ export default function MagicScreen() {
         setPending(false);
         return;
       }
+      if (session.state.status === 'signedIn' && session.state.me.user.id !== me.user.id) {
+        // The link is valid for another account: show it and ask before replacing the session.
+        setIncoming({ secret, me });
+        return;
+      }
       if (session.state.status === 'signedIn') await logoutBestEffort(session.state.api);
       await session.signIn(server, secret, me);
       router.replace('/(tabs)/feed');
@@ -81,6 +88,27 @@ export default function MagicScreen() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const switchAccount = async () => {
+    if (!server || !incoming) return;
+    setBusy(true);
+    try {
+      if (session.state.status === 'signedIn') await logoutBestEffort(session.state.api);
+      await session.signIn(server, incoming.secret, incoming.me);
+      setIncoming(null);
+      router.replace('/(tabs)/feed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const keepSession = async () => {
+    if (!server || !incoming) return;
+    // Revoke the session the link created so the unused secret does not stay valid server-side.
+    await logoutBestEffort(createApi({ apiUrl: server.apiUrl, secret: incoming.secret }));
+    setIncoming(null);
+    router.replace('/(tabs)/feed');
   };
 
   const toSignIn = () => {
@@ -96,7 +124,26 @@ export default function MagicScreen() {
       <Notice text={error} kind="error" />
       {server === null && <Notice text={strings.magic.needServer} />}
       {server && !pending && !error && <Notice text={strings.magic.failed} kind="error" />}
-      {server && pending && (
+      {incoming && session.state.status === 'signedIn' && (
+        <View style={base.card}>
+          <Text style={base.heading}>{strings.magic.switchTitle(incoming.me.user.email)}</Text>
+          <Text style={base.body}>{strings.magic.switchBody(session.state.me.user.email)}</Text>
+          <View style={base.row}>
+            <Button
+              label={strings.magic.switchCancel}
+              variant="secondary"
+              onPress={() => void keepSession()}
+              disabled={busy}
+            />
+            <Button
+              label={strings.magic.switchConfirm}
+              onPress={() => void switchAccount()}
+              busy={busy}
+            />
+          </View>
+        </View>
+      )}
+      {server && pending && !incoming && (
         <View style={base.card}>
           <Text style={base.body}>
             {strings.signIn.serverLabel}: {new URL(server.apiUrl).host}

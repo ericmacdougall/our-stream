@@ -18,6 +18,7 @@ export function FeedCard(props: {
   onOpenComments: () => void;
   onShare: () => void;
   onUnavailable: () => void;
+  onStale: () => void;
 }) {
   const { item } = props;
   const t = strings.feed;
@@ -35,6 +36,7 @@ export function FeedCard(props: {
         durationMs={item.durationMs}
         active={props.active}
         onUnavailable={props.onUnavailable}
+        onStale={props.onStale}
       />
       <View style={styles.meta} pointerEvents="box-none">
         <View style={styles.text}>

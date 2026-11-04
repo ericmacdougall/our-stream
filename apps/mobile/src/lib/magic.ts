@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Magic sign-in links: the API mails `${APP_BASE_URL}/auth/magic?token=...` (docs/api.md). The app
-// receives it as a universal link, as `ourstream://auth/magic?token=...`, or through the Expo dev
-// client (`exp://.../--/auth/magic`). The token is consumed against the pinned server only; it is
-// never logged or shown.
+// Magic sign-in links: the API mails `${APP_BASE_URL}/magic?token=...` (docs/api.md). The app
+// receives it as a universal link, as `ourstream://magic?token=...` (the older `/auth/magic` path is
+// still accepted), or through the Expo dev client (`exp://.../--/magic`). The token is consumed
+// against the last confirmed server only; it is never logged or shown.
 
 const PATHS = new Set(['/auth/magic', '/magic', 'auth/magic', 'magic']);
 const TOKEN = /^[A-Za-z0-9._~-]{20,200}$/;

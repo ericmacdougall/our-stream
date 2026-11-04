@@ -34,6 +34,8 @@ export const strings = {
     confirmBody: (host: string, domain: string) =>
       `${domain} says its our-stream server is ${host}. Only continue if you expect this server.`,
     confirmButton: 'Use this server',
+    outOfDomain: (host: string, domain: string) =>
+      `${host} is not part of ${domain}. This can be legitimate for a hosted service, but check with your IT team before signing in.`,
     discoveryFailed: {
       bad_email: 'Enter a work email address.',
       unreachable:
@@ -65,6 +67,10 @@ export const strings = {
     title: 'Signing you in…',
     needServer: 'Choose your server first, then open the sign-in link again.',
     replaces: (email: string) => `Signing in with this link will sign out ${email}.`,
+    switchTitle: (email: string) => `This link signs in as ${email}.`,
+    switchBody: (current: string) => `Continuing signs out ${current} on this device.`,
+    switchConfirm: 'Switch account',
+    switchCancel: 'Keep my session',
     failed: 'This sign-in link is invalid, expired or already used. Request a new one.',
   },
   feed: {
@@ -82,6 +88,8 @@ export const strings = {
     pinned: 'Pinned',
     by: (name: string) => `by ${name}`,
     loadMore: 'Load more',
+    previous: 'Previous clip',
+    next: 'Next clip',
     mediaError: 'Playback failed. Check the connection and try again.',
   },
   comments: {
@@ -121,6 +129,7 @@ export const strings = {
     results: (n: number) => (n === 1 ? '1 result' : `${n} results`),
     none: 'No clips match.',
     openAt: (t: string) => `Open at ${t}`,
+    openHint: 'Opens the clip',
     source: { title: 'Title', description: 'Description', transcript: 'Transcript' } as Record<
       string,
       string

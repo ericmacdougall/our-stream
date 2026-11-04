@@ -56,8 +56,10 @@ origin; until then the link opens in the web app, which consumes the token, so t
 is inactive) and as `ourstream://magic?token=...`. The token is moved into a memory slot (a token the
 router parsed from the URL is moved there and stripped from the route parameters) and consumed
 against the last confirmed server only when the user taps "Sign in". The link is validated first; only
-a successful consume replaces an existing session (which is then revoked), and a consumed token is
-remembered for the process so a replayed launch URL cannot resubmit it.
+a successful consume replaces an existing session (which is then revoked); when the link belongs to a
+different account than the current session, the app shows the incoming address and asks whether to
+switch (declining revokes the session the link created). A consumed token is remembered for the
+process so a replayed launch URL cannot resubmit it.
 
 ## Playback and media tokens
 
@@ -77,7 +79,8 @@ milestones already sent (`view_start`, `progress_25/50/75`, `complete`) in Async
 never resends a milestone. A milestone is claimed in memory before the request, persisted only after
 the server answered, and released on failure. After `complete` (or 24 h) the next play opens a new
 session, which the server counts as a rewatch (also when the clip is replayed without leaving the
-screen). Records are keyed by user so a shared device never inherits another user's session, written
+screen). A 409 `stale_version` (the clip was replaced) or a media token for another version makes the
+screen refetch the item rather than drop it; retracted or hidden clips (404-class) are dropped. Records are keyed by user so a shared device never inherits another user's session, written
 one at a time, and pruned beyond 200 entries or 30 days.
 
 ## Accessibility
@@ -95,6 +98,13 @@ Status and error texts are live regions. VoiceOver/TalkBack runs are a manual ch
 - `expo lint` has no configuration in `apps/mobile` yet; prettier, tsc, vitest and the SPDX/licence
   gates run.
 - A cold start while offline (or a 5xx from `GET /v1/me`) shows the sign-in screen instead of a retry.
+- Discovery's exact-URL check relies on React Native's `fetch` filling `response.url` (an empty value
+  fails closed as "redirected", leaving only manual entry); unverified on a device.
+- A chunked discovery response without `content-length` is read in full before the 16 KiB check; only
+  the 8 s timeout bounds it.
+- Engagement milestones the server refuses with a 4xx are abandoned for the playback session in memory
+  only; a restart may retry each once. Transient failures (429, 5xx, network) retry at most once per
+  15 s per milestone.
 
 ## Running it
 

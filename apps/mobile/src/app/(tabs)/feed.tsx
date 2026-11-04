@@ -192,6 +192,7 @@ export default function FeedScreen() {
                   router.push({ pathname: '/content/[id]/share', params: { id: item.id } })
                 }
                 onUnavailable={() => unavailable(item.id)}
+                onStale={() => void loadPage(null, true)}
               />
             )}
           />
@@ -200,7 +201,7 @@ export default function FeedScreen() {
       {items.length > 1 && (
         <View style={styles.nav}>
           <Button
-            label="Previous clip"
+            label={strings.feed.previous}
             variant="secondary"
             onPress={() => go(-1)}
             disabled={index <= 0}
@@ -209,7 +210,7 @@ export default function FeedScreen() {
             {index + 1} / {items.length}
           </Text>
           <Button
-            label="Next clip"
+            label={strings.feed.next}
             variant="secondary"
             onPress={() => go(1)}
             disabled={index >= items.length - 1}

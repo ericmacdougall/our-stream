@@ -9,7 +9,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
 import { Button } from './Button';
 import { strings } from '../i18n';
-import { dueMilestones, type Milestone, type PlaybackSession } from '../lib/engagement';
+import {
+  classifyEngagementFailure,
+  dueMilestones,
+  ENGAGEMENT_BACKOFF_MS,
+  type Milestone,
+  type PlaybackSession,
+} from '../lib/engagement';
 import { describeError, errorCodeOf, isUnavailable } from '../lib/errors';
 import { mediaUrl, tokenNeedsRefresh } from '../lib/media';
 import { tracker } from '../lib/runtime';
@@ -27,8 +33,10 @@ export interface PlayerProps {
   /** Only the active card loads media and plays; others show the poster. */
   active: boolean;
   startMs?: number;
-  /** The clip was retracted, replaced or hidden: the caller drops it from its list. */
+  /** The clip was retracted or hidden: the caller drops it from its list. */
   onUnavailable: () => void;
+  /** A newer version is current: the caller refetches the item (its URLs and version id are stale). */
+  onStale: () => void;
 }
 
 interface MediaToken {
@@ -69,8 +77,8 @@ export function Player(props: PlayerProps) {
       return null;
     }
     if (result.data.versionId !== props.versionId) {
-      // A new version is current: this card's URLs are stale, the caller refreshes its list.
-      props.onUnavailable();
+      // A new version is current: this card's URLs are stale, the caller refetches the item.
+      props.onStale();
       return null;
     }
     tokenRef.current = { token: result.data.token, expiresAt: result.data.expiresAt };
@@ -119,20 +127,34 @@ export function Player(props: PlayerProps) {
           },
         });
         if (result.error) {
-          tracker.release(ids, type);
-          if (isUnavailable(errorCodeOf(result), result.response.status)) props.onUnavailable();
+          // The per-second timeUpdate would otherwise retry a refused milestone for the rest of playback.
+          switch (classifyEngagementFailure(errorCodeOf(result), result.response.status)) {
+            case 'unavailable':
+              tracker.release(ids, type);
+              props.onUnavailable();
+              break;
+            case 'stale':
+              tracker.release(ids, type);
+              props.onStale();
+              break;
+            case 'abandon':
+              tracker.abandon(ids, type);
+              break;
+            default:
+              tracker.release(ids, type, { retryAfterMs: ENGAGEMENT_BACKOFF_MS });
+          }
           return;
         }
         await tracker.commit(ids, type);
         sentRef.current.add(type);
         if (type === 'complete') completedRef.current = true;
       } catch {
-        tracker.release(ids, type);
+        tracker.release(ids, type, { retryAfterMs: ENGAGEMENT_BACKOFF_MS });
       }
     },
     // ids is derived from props; listing its parts keeps the callback stable per clip.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [api, props.contentId, props.versionId, props.onUnavailable],
+    [api, props.contentId, props.versionId, props.onUnavailable, props.onStale],
   );
 
   useEffect(() => {
@@ -180,6 +202,8 @@ export function Player(props: PlayerProps) {
     void send('complete', positionMsRef.current);
   });
   useEventListener(player, 'statusChange', ({ status: next }) => {
+    // A source that became playable again (after a token refresh) may refresh again on the next expiry.
+    if (next === 'readyToPlay') retriedRef.current = false;
     if (next === 'readyToPlay' && pendingSeekRef.current !== null) {
       const target = pendingSeekRef.current;
       pendingSeekRef.current = null;

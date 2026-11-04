@@ -198,10 +198,7 @@ export default function SignInScreen() {
             </Text>
             <Text style={base.body}>{t.confirmBody(host(step.server.apiUrl), step.domain)}</Text>
             {hostRelation(step.domain, step.server.apiUrl) === 'other' && (
-              <Notice
-                kind="error"
-                text={`${host(step.server.apiUrl)} is not part of ${step.domain}. This can be legitimate for a hosted service, but check with your IT team before signing in.`}
-              />
+              <Notice kind="error" text={t.outOfDomain(host(step.server.apiUrl), step.domain)} />
             )}
             <View style={base.row}>
               <Button

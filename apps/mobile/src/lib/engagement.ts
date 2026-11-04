@@ -57,13 +57,34 @@ export interface TrackerDeps {
 export interface Tracker {
   /** Loads or opens the playback session for a clip; must run before `take`. */
   start(ids: PlaybackIds): Promise<PlaybackSession>;
-  /** Claims a milestone: true when it is new for this session and not already in flight. */
+  /** Claims a milestone: true when it is new for this session, not in flight, not abandoned and not backing off. */
   take(ids: PlaybackIds, type: Milestone): boolean;
   /** Marks a claimed milestone as sent (after the server answered). Never throws. */
   commit(ids: PlaybackIds, type: Milestone): Promise<void>;
-  /** Drops a claim after a failed send so it can be retried. */
-  release(ids: PlaybackIds, type: Milestone): void;
+  /** Drops a claim after a failed send; with `retryAfterMs` the milestone cannot be claimed again before then. */
+  release(ids: PlaybackIds, type: Milestone, opts?: { retryAfterMs?: number }): void;
+  /** Gives up on a milestone for this playback session (a 4xx the server will keep answering). Not persisted. */
+  abandon(ids: PlaybackIds, type: Milestone): void;
 }
+
+export type EngagementFailure = 'unavailable' | 'stale' | 'abandon' | 'backoff';
+
+/**
+ * What to do when `POST /engagement` fails: the clip is gone (404-class), a newer version is current
+ * (409 `stale_version`: the caller refetches the item), a request the server will keep refusing
+ * (other 4xx: abandon for this session), or a transient condition (429, 5xx, network: back off).
+ */
+export function classifyEngagementFailure(code: string, status?: number): EngagementFailure {
+  if (status === 404 || code === 'content_not_found' || code === 'retracted' || code === 'no_media')
+    return 'unavailable';
+  if (code === 'stale_version') return 'stale';
+  if (status === 429 || code === 'rate_limited') return 'backoff';
+  if (status !== undefined && status >= 400 && status < 500) return 'abandon';
+  return 'backoff';
+}
+
+/** Minimum gap between retries of one milestone after a transient failure. */
+export const ENGAGEMENT_BACKOFF_MS = 15_000;
 
 const keyFor = (ids: PlaybackIds) => `eng:${ids.userId}:${ids.contentId}:${ids.versionId}`;
 
@@ -71,6 +92,8 @@ export function createTracker(deps: TrackerDeps): Tracker {
   const now = deps.now ?? Date.now;
   const cache = new Map<string, StoredSession>();
   const inflight = new Set<string>();
+  const abandoned = new Set<string>();
+  const notBefore = new Map<string, number>();
   // Writes (record + index) run one at a time so two commits cannot interleave the index rewrite.
   let queue: Promise<void> = Promise.resolve();
 
@@ -157,7 +180,13 @@ export function createTracker(deps: TrackerDeps): Tracker {
       const existing = await load(ids);
       const stale = !existing || existing.completed || now() - existing.updatedAt > SESSION_TTL_MS;
       const session = stale ? fresh() : existing;
-      if (stale) await save(ids, session);
+      if (stale) {
+        // A new playback session starts clean: earlier give-ups and backoffs belonged to the old one.
+        const prefix = `${keyFor(ids)}:`;
+        for (const k of [...abandoned]) if (k.startsWith(prefix)) abandoned.delete(k);
+        for (const k of [...notBefore.keys()]) if (k.startsWith(prefix)) notBefore.delete(k);
+        await save(ids, session);
+      }
       return {
         sessionKey: session.sessionKey,
         sent: [...session.sent],
@@ -169,7 +198,10 @@ export function createTracker(deps: TrackerDeps): Tracker {
       const session = cache.get(key);
       if (!session) return false;
       const claim = `${key}:${type}`;
-      if (session.sent.includes(type) || inflight.has(claim)) return false;
+      if (session.sent.includes(type) || inflight.has(claim) || abandoned.has(claim)) return false;
+      const until = notBefore.get(claim);
+      if (until !== undefined && now() < until) return false;
+      notBefore.delete(claim);
       inflight.add(claim);
       return true;
     },
@@ -185,8 +217,16 @@ export function createTracker(deps: TrackerDeps): Tracker {
         updatedAt: now(),
       });
     },
-    release(ids, type) {
-      inflight.delete(`${keyFor(ids)}:${type}`);
+    release(ids, type, opts) {
+      const claim = `${keyFor(ids)}:${type}`;
+      inflight.delete(claim);
+      if (opts?.retryAfterMs && opts.retryAfterMs > 0)
+        notBefore.set(claim, now() + opts.retryAfterMs);
+    },
+    abandon(ids, type) {
+      const claim = `${keyFor(ids)}:${type}`;
+      inflight.delete(claim);
+      abandoned.add(claim);
     },
   };
 }

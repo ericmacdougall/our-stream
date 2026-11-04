@@ -87,27 +87,24 @@ function ContentScreen() {
     [api, id],
   );
 
-  useEffect(() => {
-    let live = true;
-    (async () => {
-      try {
-        const result = await api.GET('/v1/content/{id}', { params: { path: { id } } });
-        if (!live) return;
-        if (result.error || !result.data) {
-          if (isUnavailable(errorCodeOf(result), result.response.status)) setGone(true);
-          else setError(errorMessage(result));
-          return;
-        }
-        setDetail(result.data);
-        await loadComments(null);
-      } catch {
-        if (live) setError(strings.errors.offline);
+  const loadDetail = useCallback(async () => {
+    try {
+      const result = await api.GET('/v1/content/{id}', { params: { path: { id } } });
+      if (result.error || !result.data) {
+        if (isUnavailable(errorCodeOf(result), result.response.status)) setGone(true);
+        else setError(errorMessage(result));
+        return;
       }
-    })();
-    return () => {
-      live = false;
-    };
+      setDetail(result.data);
+      await loadComments(null);
+    } catch {
+      setError(strings.errors.offline);
+    }
   }, [api, id, loadComments]);
+
+  useEffect(() => {
+    void loadDetail();
+  }, [loadDetail]);
 
   const toggleLike = async () => {
     if (!detail || likeBusy) return;
@@ -234,6 +231,7 @@ function ContentScreen() {
                   active
                   startMs={startMs}
                   onUnavailable={unavailable}
+                  onStale={() => void loadDetail()}
                 />
               ) : (
                 <Text style={[base.body, { color: colors.onVideo, padding: space.lg }]}>

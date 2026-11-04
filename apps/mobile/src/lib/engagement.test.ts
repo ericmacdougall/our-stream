@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from 'vitest';
-import { createTracker, dueMilestones, MAX_SESSIONS, SESSION_TTL_MS } from './engagement';
+import {
+  classifyEngagementFailure,
+  createTracker,
+  dueMilestones,
+  MAX_SESSIONS,
+  SESSION_TTL_MS,
+} from './engagement';
 import { memoryStore, type KeyValueStore } from './kv';
 
 describe('dueMilestones', () => {
@@ -131,6 +137,30 @@ describe('createTracker', () => {
     expect(index.map(([k]) => k).sort()).toEqual(['eng:u:a:v', 'eng:u:b:v']);
   });
 
+  it('abandons a milestone for the session and backs off transient failures', async () => {
+    const store = memoryStore();
+    let now = 1_000;
+    const t = createTracker({ store, newKey: () => 'k', now: () => now });
+    await t.start(ids);
+    expect(t.take(ids, 'progress_25')).toBe(true);
+    t.abandon(ids, 'progress_25');
+    expect(t.take(ids, 'progress_25')).toBe(false);
+    expect(store.dump()['eng:u1:c1:v1']).not.toContain('progress_25'); // not persisted as sent
+    expect(t.take(ids, 'progress_50')).toBe(true);
+    t.release(ids, 'progress_50', { retryAfterMs: 15_000 });
+    expect(t.take(ids, 'progress_50')).toBe(false);
+    now += 14_999;
+    expect(t.take(ids, 'progress_50')).toBe(false);
+    now += 1;
+    expect(t.take(ids, 'progress_50')).toBe(true);
+    await t.commit(ids, 'progress_50');
+    // A fresh session (after complete) forgets the give-up.
+    t.take(ids, 'complete');
+    await t.commit(ids, 'complete');
+    await t.start(ids);
+    expect(t.take(ids, 'progress_25')).toBe(true);
+  });
+
   it('never throws when the store fails', async () => {
     const broken: KeyValueStore = {
       get: async () => null,
@@ -144,5 +174,20 @@ describe('createTracker', () => {
     expect(t.take(ids, 'view_start')).toBe(true);
     await expect(t.commit(ids, 'view_start')).resolves.toBeUndefined();
     expect(t.take(ids, 'view_start')).toBe(false);
+  });
+});
+
+describe('classifyEngagementFailure', () => {
+  it('maps server answers to the retry policy', () => {
+    expect(classifyEngagementFailure('content_not_found', 404)).toBe('unavailable');
+    expect(classifyEngagementFailure('retracted', 409)).toBe('unavailable');
+    expect(classifyEngagementFailure('unknown', 404)).toBe('unavailable');
+    expect(classifyEngagementFailure('stale_version', 409)).toBe('stale');
+    expect(classifyEngagementFailure('rate_limited', 429)).toBe('backoff');
+    expect(classifyEngagementFailure('internal', 500)).toBe('backoff');
+    expect(classifyEngagementFailure('unknown', undefined)).toBe('backoff'); // network
+    expect(classifyEngagementFailure('validation', 400)).toBe('abandon');
+    expect(classifyEngagementFailure('role_forbidden', 403)).toBe('abandon');
+    expect(classifyEngagementFailure('idempotency_mismatch', 409)).toBe('abandon');
   });
 });
