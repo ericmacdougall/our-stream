@@ -72,6 +72,42 @@ export function registerOrgRoutes(fastify: FastifyInstance, ctx: AppContext): vo
   );
 
   app.get(
+    '/v1/streams/:id',
+    {
+      schema: {
+        tags: ['org'],
+        params: z.object({ id: Uuid }),
+        response: { 200: StreamM1b },
+        security,
+      },
+    },
+    async (req) => {
+      const auth = requireMember(req);
+      return withTenant(ctx.pool, { orgId: auth.orgId, userId: auth.userId }, async (client) => {
+        // Same visibility as the list: a private stream exists only for members holding a role on it.
+        const r = await client.query<StreamRow>(
+          `SELECT s.id, s.kind, s.slug, s.name, usa.role AS my_role,
+                  COALESCE((s.settings -> 'comments' ->> 'enabled') IS DISTINCT FROM 'false', true) AS comments_enabled
+           FROM stream s LEFT JOIN user_stream_access usa
+             ON usa.org_id = s.org_id AND usa.stream_id = s.id AND usa.user_id = $2
+           WHERE s.org_id = $1 AND s.id = $3 AND (s.kind <> 'private' OR usa.role IS NOT NULL)`,
+          [auth.orgId, auth.userId, req.params.id],
+        );
+        const row = r.rows[0];
+        if (!row) throw notFound('stream_not_found', 'stream not found');
+        return {
+          id: row.id,
+          kind: row.kind,
+          slug: row.slug,
+          name: row.name,
+          myRole: row.my_role,
+          commentsEnabled: row.comments_enabled,
+        };
+      });
+    },
+  );
+
+  app.get(
     '/v1/streams/:id/members',
     {
       schema: {

@@ -108,6 +108,10 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   await app.register(cors, {
     origin: [deps.config.APP_BASE_URL],
     credentials: true,
+    // @fastify/cors only advertises GET, HEAD and POST by default; unlike/unpin (DELETE), settings and
+    // content edits (PATCH) and tags (PUT) are cross-origin from the web app when it is not behind the
+    // same-origin rewrite, so the preflight must allow them (GoodQA #35644).
+    methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     exposedHeaders: ['content-range', 'accept-ranges'],
   });
   await app.register(cookie);

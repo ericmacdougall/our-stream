@@ -19,6 +19,35 @@ describe('api app', () => {
     await app.close();
   });
 
+  it('answers CORS preflights for the web origin with DELETE and PATCH allowed and credentials', async () => {
+    const app = await buildApp({ config, pool: null, version: 'test' });
+    for (const method of ['DELETE', 'PATCH', 'PUT', 'POST']) {
+      const res = await app.inject({
+        method: 'OPTIONS',
+        url: '/v1/content/00000000-0000-4000-8000-000000000000/like',
+        headers: {
+          origin: config.APP_BASE_URL,
+          'access-control-request-method': method,
+          'access-control-request-headers': 'content-type,x-csrf-token',
+        },
+      });
+      expect(res.statusCode, method).toBe(204);
+      expect(res.headers['access-control-allow-origin']).toBe(config.APP_BASE_URL);
+      expect(res.headers['access-control-allow-credentials']).toBe('true');
+      expect(String(res.headers['access-control-allow-methods']).split(/,\s*/)).toEqual(
+        expect.arrayContaining([method]),
+      );
+    }
+    // A foreign origin gets no allow-origin header.
+    const foreign = await app.inject({
+      method: 'OPTIONS',
+      url: '/v1/content/00000000-0000-4000-8000-000000000000/like',
+      headers: { origin: 'https://evil.example', 'access-control-request-method': 'DELETE' },
+    });
+    expect(foreign.headers['access-control-allow-origin']).toBeUndefined();
+    await app.close();
+  });
+
   it('serves an OpenAPI 3.1 document that includes the M1a routes', async () => {
     const app = await buildApp({ config, pool: null, version: 'test' });
     const res = await app.inject({ method: 'GET', url: '/openapi.json' });

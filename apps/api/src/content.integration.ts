@@ -50,6 +50,36 @@ describe.skipIf(!integrationReady)('content, publish rules and feed (integration
     await h.cleanup();
   });
 
+  it('GET /v1/streams/:id answers the stream with the caller role; private streams are hidden from non-members', async () => {
+    const r = await h.call('GET', `/v1/streams/${dept}`, member);
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({
+      id: dept,
+      kind: 'department',
+      myRole: 'viewer',
+      commentsEnabled: true,
+    });
+    expect((r.body as { slug: string }).slug).toBe(`dept-${h.suffix}`);
+    expect((await h.call('GET', `/v1/streams/${dept}`, outsider)).body).toMatchObject({
+      id: dept,
+      myRole: null,
+    });
+    const secret = await createStream(h, owner, 'hidden', 'private', [
+      { session: member, role: 'viewer' },
+    ]);
+    expect((await h.call('GET', `/v1/streams/${secret}`, member)).body).toMatchObject({
+      id: secret,
+      kind: 'private',
+      myRole: 'viewer',
+    });
+    const asOutsider = await h.call('GET', `/v1/streams/${secret}`, outsider);
+    expect(asOutsider.status).toBe(404);
+    expect(errorCode(asOutsider.body)).toBe('stream_not_found');
+    const unknown = await h.call('GET', `/v1/streams/${randomUUID()}`, owner);
+    expect(unknown.status).toBe(404);
+    expect(errorCode(unknown.body)).toBe('stream_not_found');
+  });
+
   it('GET /v1/streams/:id/members lists effective members with roles; private streams are hidden from non-members (GoodQA #35633)', async () => {
     const r = await h.call('GET', `/v1/streams/${dept}/members`, member);
     expect(r.status).toBe(200);
