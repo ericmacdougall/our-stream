@@ -47,7 +47,11 @@ services:
       - storage-data:/data
       - ./seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
     healthcheck:
-      test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1:8333/; rc=$$?; [ $$rc -eq 0 ] || [ $$rc -eq 8 ]']
+      test:
+        [
+          'CMD-SHELL',
+          'wget -q -O /dev/null http://127.0.0.1:8333/; rc=$$?; [ $$rc -eq 0 ] || [ $$rc -eq 8 ]',
+        ]
       interval: 5s
       timeout: 3s
       retries: 30
