@@ -110,7 +110,7 @@ export function Player(props: PlayerProps) {
             versionId: props.versionId,
             sessionKey: session.sessionKey,
             type,
-            positionMs: Math.max(0, Math.round(positionMs)),
+            positionMs: Math.min(2_147_483_647, Math.max(0, Math.round(positionMs))),
           },
         });
         if (result.error) {

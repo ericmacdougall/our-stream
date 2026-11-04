@@ -34,12 +34,14 @@ export default function ShareScreen() {
       .then((result) => {
         if (!live) return;
         if (result.error || !result.data) setError(errorMessage(result));
-        else
-          setMembers(
-            (result.data as Member[]).filter(
-              (m) => m.status === 'active' && m.userId !== me.user.id,
-            ),
-          );
+        else {
+          // Contract: `{ items }`; an older API answers a bare array, accepted until it is aligned.
+          const raw: unknown = result.data;
+          const list = (
+            Array.isArray(raw) ? raw : ((raw as { items?: Member[] }).items ?? [])
+          ) as Member[];
+          setMembers(list.filter((m) => m.status === 'active' && m.userId !== me.user.id));
+        }
       })
       .catch(() => live && setError(strings.errors.offline));
     return () => {

@@ -41,7 +41,10 @@ export default function SignInScreen() {
       if (!domain) return;
       void pinnedServer(secureStore, domain, { allowLoopbackHttp: ALLOW_LOOPBACK_HTTP }).then(
         (server) => {
-          if (server) setStep({ kind: 'credentials', domain, server });
+          if (server) {
+            setError(null);
+            setStep({ kind: 'credentials', domain, server });
+          }
         },
       );
     }, [email, step.kind]),
