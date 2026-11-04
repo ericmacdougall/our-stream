@@ -47,11 +47,9 @@ services:
       - storage-data:/data
       - ./seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
     healthcheck:
+      # BusyBox wget exits 1 on any HTTP error, so key on the status line: the S3 root answers 403 to anonymous requests.
       test:
-        [
-          'CMD-SHELL',
-          'wget -q -O /dev/null http://127.0.0.1:8333/; rc=$$?; [ $$rc -eq 0 ] || [ $$rc -eq 8 ]',
-        ]
+        ['CMD-SHELL', 'wget -S -q -O /dev/null http://127.0.0.1:8333/ 2>&1 | grep -q "HTTP/1.1 "']
       interval: 5s
       timeout: 3s
       retries: 30
