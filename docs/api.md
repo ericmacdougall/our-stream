@@ -65,6 +65,11 @@ An invited user signs in through the emailed link and may then choose a password
   deferred.) Private streams are listed only to members holding a role on them.
 - `POST /v1/streams/:id/grants` writes one tuple through `writeTuple`; rule violations map to 403 with the
   rule code (`stream_owner_required`, `bad_subject`, ...), missing streams/groups to 404.
+- `GET /v1/streams`, `GET /v1/members` and `GET /v1/streams/:id/members` answer `{ items: [...] }` as the
+  frozen contract declares (the M1a routes answered bare arrays, GoodQA #35633). Stream members are the
+  effective members from `user_stream_access` (highest role, including access through groups and the
+  everyone grant) who are active; a private stream's members are listable only by members holding a role
+  on it (404 `stream_not_found` otherwise), like the stream list.
 
 ## Content lifecycle
 
