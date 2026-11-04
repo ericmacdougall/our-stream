@@ -36,6 +36,11 @@ export const Me = z.object({
   csrfToken: z.string(),
 });
 export const SwitchOrgRequest = z.object({ orgId: Uuid });
+/**
+ * Sign-in responses (signup, login, magic-link consume). `sessionToken` is present only when the client
+ * asked for bearer transport (header `x-session-transport: bearer`, native apps); web uses the cookie.
+ */
+export const AuthResponse = Me.extend({ sessionToken: z.string().optional() });
 
 // ---- orgs, streams, groups, invites ----
 export const StreamKind = z.enum(['company', 'department', 'team', 'project', 'private']);
@@ -203,6 +208,12 @@ export const FeedResponse = z.object({
 export const ViewEventRequest = z.object({
   versionId: Uuid,
   completed: z.boolean().default(false),
+});
+/** Short-lived media token for native players (ADR-0003); appended as `?t=` to proxy URLs. */
+export const MediaTokenResponse = z.object({
+  token: z.string(),
+  versionId: Uuid,
+  expiresAt: z.iso.datetime(),
 });
 
 // ---- notifications ----
