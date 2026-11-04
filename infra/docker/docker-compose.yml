@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Development and evaluation stack. Not hardened for production; see infra/helm for Kubernetes.
 # Usage: docker compose -f infra/docker/docker-compose.yml up
+# Ports bind to 127.0.0.1 by default; set BIND_ADDR=0.0.0.0 to expose on all interfaces.
 name: our-stream
 
 services:
@@ -19,7 +20,7 @@ services:
         'log_min_duration_statement=500',
       ]
     ports:
-      - '${POSTGRES_PORT:-5432}:5432'
+      - '${BIND_ADDR:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432'
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
@@ -42,7 +43,7 @@ services:
         '-s3.config=/etc/seaweedfs/s3.json',
       ]
     ports:
-      - '${S3_PORT:-8333}:8333'
+      - '${BIND_ADDR:-127.0.0.1}:${S3_PORT:-8333}:8333'
     volumes:
       - storage-data:/data
       - ./seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
@@ -58,7 +59,7 @@ services:
     # Local SMTP sink so magic links and invites work without real SMTP (risk R34).
     image: axllent/mailpit:v1.28
     ports:
-      - '${MAILPIT_PORT:-8025}:8025'
+      - '${BIND_ADDR:-127.0.0.1}:${MAILPIT_PORT:-8025}:8025'
     environment:
       MP_SMTP_AUTH_ACCEPT_ANY: '1'
       MP_SMTP_AUTH_ALLOW_INSECURE: '1'
@@ -96,14 +97,21 @@ services:
       <<: *app-env
       PORT: '4000'
     ports:
-      - '${API_PORT:-4000}:4000'
+      - '${BIND_ADDR:-127.0.0.1}:${API_PORT:-4000}:4000'
     depends_on:
       migrate:
         condition: service_completed_successfully
       storage:
         condition: service_healthy
     healthcheck:
-      test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1:4000/health || exit 1']
+      # The slim Node image has no wget or curl; probe with Node's fetch.
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:4000/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
       interval: 5s
       timeout: 3s
       retries: 30
@@ -130,7 +138,7 @@ services:
       API_INTERNAL_URL: http://api:4000
       NEXT_PUBLIC_API_URL: http://localhost:${API_PORT:-4000}
     ports:
-      - '${WEB_PORT:-3000}:3000'
+      - '${BIND_ADDR:-127.0.0.1}:${WEB_PORT:-3000}:3000'
     depends_on:
       api:
         condition: service_healthy
