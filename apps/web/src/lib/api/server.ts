@@ -1,0 +1,43 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Data Access Layer (ADR-0011): server components and route handlers reach the API only through
+// this module. It forwards the incoming session cookie and never caches personalised responses.
+import 'server-only';
+import { cookies } from 'next/headers';
+import { createClient, type ApiClient } from '@our-stream/contracts';
+import { SESSION_COOKIE } from '@/proxy';
+
+export function apiBaseUrl(): string {
+  return (process.env['API_INTERNAL_URL'] ?? 'http://localhost:4000').replace(/\/$/, '');
+}
+
+/** A typed client bound to the current request's cookies. */
+export async function serverApi(): Promise<ApiClient> {
+  const jar = await cookies();
+  const cookieHeader = jar
+    .getAll()
+    .map((c) => `${c.name}=${c.value}`)
+    .join('; ');
+  return createClient({
+    baseUrl: apiBaseUrl(),
+    fetch: (input, init) => {
+      const headers = new Headers(init?.headers);
+      if (cookieHeader) headers.set('cookie', cookieHeader);
+      return fetch(input, { ...init, headers, cache: 'no-store' });
+    },
+  });
+}
+
+export type Me = NonNullable<Awaited<ReturnType<typeof getMe>>>;
+
+/** The signed-in user, or null when there is no valid session (401) or the API is unreachable. */
+export async function getMe() {
+  const jar = await cookies();
+  if (!jar.has(SESSION_COOKIE)) return null;
+  try {
+    const api = await serverApi();
+    const { data } = await api.GET('/v1/me');
+    return data ?? null;
+  } catch {
+    return null;
+  }
+}

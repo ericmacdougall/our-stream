@@ -43,4 +43,5 @@ export const ContentState = z.enum(['draft', 'published', 'retracted']);
 export const EventTag = z.enum(['onboarding', 'announcement', 'current-events', 'training']);
 
 export * from './m1a.js';
-export { createClient } from './client.js';
+export type { M1aPaths, StreamMember } from './m1a-paths.js';
+export { createClient, type ApiClient, type ApiPaths } from './client.js';
