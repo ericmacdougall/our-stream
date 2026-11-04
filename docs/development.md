@@ -17,10 +17,29 @@ pnpm lint            # eslint + prettier
 pnpm typecheck
 pnpm test            # unit tests (no database)
 pnpm db:migrate      # applies packages/db/migrations with DATABASE_ADMIN_URL, then schema lint
-pnpm test:integration  # needs DATABASE_ADMIN_URL and DATABASE_URL (RLS-bound app role)
+pnpm test:integration  # needs DATABASE_ADMIN_URL and DATABASE_URL (RLS-bound app role); the API suites also need S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY
 pnpm headers:check && pnpm licenses:check
 pnpm contracts:generate   # emit OpenAPI from the API and regenerate typed client types
 ```
+
+## Running the API alone
+
+```sh
+# Postgres (with the dev roles) and SeaweedFS as in the compose files:
+docker run -d --name os-pg -e POSTGRES_USER=ourstream_admin -e POSTGRES_PASSWORD=dev -e POSTGRES_DB=ourstream \
+  -e APP_DB_PASSWORD=ourstream-app-dev-only -e PLATFORM_DB_PASSWORD=ourstream-platform-dev-only \
+  -p 127.0.0.1:5432:5432 -v "$PWD/infra/docker/postgres/init:/docker-entrypoint-initdb.d:ro" pgvector/pgvector:pg17
+docker run -d --name os-s3 -p 127.0.0.1:8333:8333 -v "$PWD/infra/docker/seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro" \
+  chrislusf/seaweedfs:3.97 server -s3 -s3.port=8333 -dir=/data -s3.config=/etc/seaweedfs/s3.json
+export DATABASE_ADMIN_URL=postgres://ourstream_admin:dev@127.0.0.1:5432/ourstream
+export DATABASE_URL=postgres://ourstream_app:ourstream-app-dev-only@127.0.0.1:5432/ourstream
+export S3_ENDPOINT=http://127.0.0.1:8333 S3_ACCESS_KEY=ourstream-dev S3_SECRET_KEY=ourstream-dev-secret-only
+pnpm db:migrate
+pnpm --filter @our-stream/api dev        # http://localhost:4000/health, /openapi.json
+pnpm --filter @our-stream/api test:integration
+```
+
+`docs/api.md` describes sessions, CSRF, uploads, publishing, the feed and the media proxy.
 
 ## Database roles
 

@@ -17,6 +17,16 @@ import {
 import type pg from 'pg';
 import { HealthResponse, MetaResponse, type ErrorResponse } from '@our-stream/contracts';
 import type { Config } from './config.js';
+import type { AppContext } from './context.js';
+import { enforceCsrf, resolveAuth } from './lib/auth.js';
+import { ApiError } from './lib/errors.js';
+import { LoggingMailer, createSmtpMailer, type Mailer } from './lib/mailer.js';
+import { createS3Store, type ObjectStore } from './lib/storage.js';
+import { registerAuthRoutes } from './routes/auth.js';
+import { registerContentRoutes } from './routes/content.js';
+import { registerFeedRoutes } from './routes/feed.js';
+import { registerMediaRoutes } from './routes/media.js';
+import { registerOrgRoutes } from './routes/org.js';
 
 function parseTrustProxy(v: string): boolean | string {
   if (v === 'true') return true;
@@ -26,8 +36,11 @@ function parseTrustProxy(v: string): boolean | string {
 
 export interface AppDeps {
   config: Config;
+  /** null only for schema emission and unit tests; every route then answers 503. */
   pool: pg.Pool | null;
   version: string;
+  mailer?: Mailer;
+  store?: ObjectStore;
 }
 
 export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
@@ -38,6 +51,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       redact: [
         'req.headers.authorization',
         'req.headers.cookie',
+        'req.headers["x-csrf-token"]',
         'res.headers["set-cookie"]',
         'err.detail',
         'err.hint',
@@ -55,7 +69,11 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
 
   await app.register(sensible);
   await app.register(helmet, { contentSecurityPolicy: false });
-  await app.register(cors, { origin: [deps.config.APP_BASE_URL], credentials: true });
+  await app.register(cors, {
+    origin: [deps.config.APP_BASE_URL],
+    credentials: true,
+    exposedHeaders: ['content-range', 'accept-ranges'],
+  });
   await app.register(cookie);
   await app.register(rateLimit, { max: 300, timeWindow: '1 minute' });
   await app.register(swagger, {
@@ -88,9 +106,15 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
         ? (err as { statusCode: number }).statusCode
         : 500;
     if (status >= 500) req.log.error({ err, requestId: req.id }, 'unhandled error');
+    const rawCode = (err as { code?: string }).code;
     const body: ErrorResponse = {
       error: {
-        code: status >= 500 ? 'internal' : ((err as { code?: string }).code ?? 'bad_request'),
+        code:
+          status >= 500
+            ? 'internal'
+            : rawCode === 'FST_ERR_VALIDATION'
+              ? 'validation'
+              : (rawCode ?? 'bad_request'),
         message: status >= 500 ? 'internal error' : (err as Error).message,
         requestId: String(req.id),
       },
@@ -98,9 +122,13 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     void reply.status(status).send(body);
   });
 
+  const publicRoute = { public: true };
   app.get(
     '/health',
-    { schema: { tags: ['system'], response: { 200: HealthResponse, 503: HealthResponse } } },
+    {
+      config: publicRoute,
+      schema: { tags: ['system'], response: { 200: HealthResponse, 503: HealthResponse } },
+    },
     async (_req, reply) => {
       let database: 'ok' | 'degraded' | 'down' = 'down';
       if (deps.pool) {
@@ -118,7 +146,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
 
   app.get(
     '/v1/meta',
-    { schema: { tags: ['system'], response: { 200: MetaResponse } } },
+    { config: publicRoute, schema: { tags: ['system'], response: { 200: MetaResponse } } },
     async (_req, reply) => {
       reply.header('cache-control', 'public, max-age=300');
       return {
@@ -130,10 +158,36 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     },
   );
 
-  app.get('/openapi.json', { schema: { hide: true } }, async (_req, reply) => {
+  app.get('/openapi.json', { config: publicRoute, schema: { hide: true } }, async (_req, reply) => {
     reply.header('cache-control', 'public, max-age=300');
     return app.swagger();
   });
+
+  // Authenticated surface. Session, membership and CSRF are resolved per request from the database.
+  app.decorateRequest('auth', null);
+  const pool = deps.pool;
+  app.addHook('preHandler', async (req) => {
+    if ((req.routeOptions.config as { public?: boolean }).public) return;
+    if (!pool) throw new ApiError(503, 'unavailable', 'database not configured');
+    req.auth = await resolveAuth(req, pool);
+    enforceCsrf(req, deps.config);
+  });
+
+  const ctx: AppContext = {
+    config: deps.config,
+    pool: pool ?? (null as unknown as pg.Pool),
+    mailer:
+      deps.mailer ??
+      (deps.config.SMTP_URL
+        ? createSmtpMailer(deps.config.SMTP_URL, deps.config.MAIL_FROM)
+        : new LoggingMailer(app.log)),
+    store: deps.store ?? createS3Store(deps.config),
+  };
+  registerAuthRoutes(app, ctx);
+  registerOrgRoutes(app, ctx);
+  registerContentRoutes(app, ctx);
+  registerFeedRoutes(app, ctx);
+  registerMediaRoutes(app, ctx);
 
   return app;
 }
