@@ -294,7 +294,7 @@ export function PublishForm({
               aria-describedby="publishAt-hint"
               onChange={(e) => setPublishAtLocal(e.target.value)}
             />
-            <small id="publishAt-hint" className="muted">
+            <small id="publishAt-hint" className="muted" suppressHydrationWarning>
               {t('publish.zoneHint', { zone: Intl.DateTimeFormat().resolvedOptions().timeZone })}
             </small>
           </div>

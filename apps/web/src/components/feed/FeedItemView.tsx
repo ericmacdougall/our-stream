@@ -136,54 +136,67 @@ export const FeedItemView = forwardRef<HTMLElement, FeedItemViewProps>(function 
           onShare={onShare}
           onUnavailable={onUnavailable}
         />
-        {item.description ? <p className="feed-description">{item.description}</p> : null}
-        {item.chapters.length > 0 ? (
-          <nav aria-label={t('upload.chapters')} className="chapters">
-            <ol>
-              {item.chapters.map((c, i) => (
-                <li key={c.atMs}>
-                  <button
-                    type="button"
-                    className={i === chapterIndex ? 'chapter current' : 'chapter'}
-                    aria-current={i === chapterIndex ? 'true' : undefined}
-                    onClick={() => {
-                      handleRef.current?.seekToMs(c.atMs);
-                      void handleRef.current?.play();
-                    }}
-                  >
-                    <span className="time">{formatTimestamp(c.atMs)}</span> {c.title}
-                  </button>
-                </li>
-              ))}
-            </ol>
-          </nav>
-        ) : null}
-        {item.links.length > 0 ? (
-          <ul className="feed-links" aria-label={t('upload.links')}>
-            {item.links.map((l) => (
-              <li key={l.url}>
-                {externalHost(l.url) === null ? (
-                  // Not http(s): never render as a clickable link (javascript:, data:, ...).
-                  <span>{l.label || t('feed.linkUnavailable')}</span>
-                ) : l.kind === 'internet' ? (
-                  <a
-                    href={l.url}
-                    rel="noopener noreferrer"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      onExternalLink(l.url, l.label || l.url);
-                    }}
-                  >
-                    {l.label || l.url} <span className="muted">({t('links.kind.internet')})</span>
-                  </a>
-                ) : (
-                  <a href={l.url} rel="noopener noreferrer">
-                    {l.label || l.url}
-                  </a>
-                )}
-              </li>
-            ))}
-          </ul>
+        {item.description || item.chapters.length > 0 || item.links.length > 0 ? (
+          // The only scrollable part of the meta block; the action row above it is never clipped.
+          // Focusable so keyboard users can scroll it (axe: scrollable-region-focusable).
+          <div
+            className="feed-extra"
+            // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- keyboard users must be able to scroll this region
+            tabIndex={0}
+            role="region"
+            aria-label={t('feed.moreAbout')}
+          >
+            {item.description ? <p className="feed-description">{item.description}</p> : null}
+            {item.chapters.length > 0 ? (
+              <nav aria-label={t('upload.chapters')} className="chapters">
+                <ol>
+                  {item.chapters.map((c, i) => (
+                    <li key={c.atMs}>
+                      <button
+                        type="button"
+                        className={i === chapterIndex ? 'chapter current' : 'chapter'}
+                        aria-current={i === chapterIndex ? 'true' : undefined}
+                        onClick={() => {
+                          handleRef.current?.seekToMs(c.atMs);
+                          void handleRef.current?.play();
+                        }}
+                      >
+                        <span className="time">{formatTimestamp(c.atMs)}</span> {c.title}
+                      </button>
+                    </li>
+                  ))}
+                </ol>
+              </nav>
+            ) : null}
+            {item.links.length > 0 ? (
+              <ul className="feed-links" aria-label={t('upload.links')}>
+                {item.links.map((l) => (
+                  <li key={l.url}>
+                    {externalHost(l.url) === null ? (
+                      // Not http(s): never render as a clickable link (javascript:, data:, ...).
+                      <span>{l.label || t('feed.linkUnavailable')}</span>
+                    ) : l.kind === 'internet' ? (
+                      <a
+                        href={l.url}
+                        rel="noopener noreferrer"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          onExternalLink(l.url, l.label || l.url);
+                        }}
+                      >
+                        {l.label || l.url}{' '}
+                        <span className="muted">({t('links.kind.internet')})</span>
+                      </a>
+                    ) : (
+                      <a href={l.url} rel="noopener noreferrer">
+                        {l.label || l.url}
+                      </a>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
         ) : null}
       </div>
     </article>

@@ -367,7 +367,8 @@ button.danger {
   scroll-snap-stop: always;
   position: relative;
   display: grid;
-  grid-template-rows: 1fr auto;
+  /* minmax(0, 1fr): the video row shrinks; the meta row (auto) is never squeezed or clipped. */
+  grid-template-rows: minmax(0, 1fr) auto;
 }
 .feed-item:focus {
   outline: none;
@@ -411,8 +412,21 @@ button.danger {
   padding: var(--space-1) var(--space-2) var(--space-2);
   background: linear-gradient(to top, rgba(0, 0, 0, 0.92), rgba(0, 0, 0, 0.75));
   color: #fff;
-  max-height: 45%;
-  overflow: auto;
+}
+/* Description, chapters and links scroll inside their own small region so the title, byline and
+   the Like / Comments / Share row above it always stay visible and clickable. */
+.feed-extra {
+  max-height: 6rem;
+  overflow-y: auto;
+}
+.feed-extra:focus-visible {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 2px;
+}
+@media (max-height: 700px) {
+  .feed-extra {
+    max-height: 3.5rem;
+  }
 }
 .feed-meta a {
   color: #bfe9dc;
@@ -420,6 +434,13 @@ button.danger {
 .feed-title {
   margin: 0 0 0.25rem;
   font-size: 1.15rem;
+  /* Two lines at most; the full title is the article's accessible name and on the clip page. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
 }
 .feed-byline {
   display: flex;

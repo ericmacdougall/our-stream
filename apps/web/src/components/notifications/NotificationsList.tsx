@@ -77,7 +77,9 @@ export function NotificationsList({
                   )}
                 </p>
                 <small className="muted">
-                  <time dateTime={n.createdAt}>{formatter.format(new Date(n.createdAt))}</time>
+                  <time dateTime={n.createdAt} suppressHydrationWarning>
+                    {formatter.format(new Date(n.createdAt))}
+                  </time>
                   {n.readAt ? ` · ${t('notifications.read')}` : ''}
                 </small>
               </div>

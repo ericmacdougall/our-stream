@@ -94,7 +94,8 @@ export function ContentPanel({
     <>
       <header className="masthead">
         <h1>{detail.title}</h1>
-        <p className="muted">
+        {/* Dates are formatted in the viewer's time zone and locale, which differ from the server's. */}
+        <p className="muted" suppressHydrationWarning>
           {t('content.byOwner', { name: detail.owner.displayName })} ·{' '}
           <span data-testid="content-state">{t(STATE_LABEL[detail.state])}</span>
           {detail.publishAt
