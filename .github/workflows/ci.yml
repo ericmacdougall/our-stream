@@ -61,5 +61,34 @@ jobs:
       - run: pnpm test
       - run: pnpm db:migrate
       - run: pnpm test:integration
-      - name: license and header gate
-        run: pnpm licenses:check && pnpm headers:check
+      - name: license, header and Dockerfile gates
+        run: pnpm licenses:check && pnpm headers:check && pnpm dockerfiles:check
+
+  helm:
+    name: infra (helm lint, template, kubeconform, invariants; compose invariants)
+    runs-on: ubuntu-latest
+    env:
+      HELM_VERSION: v4.3.1
+      HELM_SHA256: 0403a88ae20913d11b10a2467b50087721fea7581736da6b9d3992f5357fe54b
+      KUBECONFORM_VERSION: v0.8.0
+      KUBECONFORM_SHA256: 9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883
+    steps:
+      - uses: actions/checkout@v4
+      - name: install pinned helm and kubeconform
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.local/bin" && cd "$(mktemp -d)"
+          curl -fsSLO "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  helm-${HELM_VERSION}-linux-amd64.tar.gz" | sha256sum -c -
+          tar xzf "helm-${HELM_VERSION}-linux-amd64.tar.gz" && mv linux-amd64/helm "$HOME/.local/bin/helm"
+          curl -fsSLO "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  kubeconform-linux-amd64.tar.gz" | sha256sum -c -
+          tar xzf kubeconform-linux-amd64.tar.gz && mv kubeconform "$HOME/.local/bin/kubeconform"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          python3 -c 'import yaml' || sudo apt-get install -y --no-install-recommends python3-yaml
+      - name: chart checks (infra/helm/our-stream/ci/check.sh)
+        run: bash infra/helm/our-stream/ci/check.sh
+      - name: compose trust-chain invariants (infra/docker/check-compose.py)
+        run: |
+          docker compose -f infra/docker/docker-compose.yml config > /tmp/compose-rendered.yaml
+          python3 infra/docker/check-compose.py /tmp/compose-rendered.yaml

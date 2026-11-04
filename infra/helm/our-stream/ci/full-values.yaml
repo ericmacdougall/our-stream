@@ -1,0 +1,62 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# CI rendering with every optional template enabled. Placeholder names only; no credentials.
+appBaseUrl: https://stream.example.test
+objectStorage:
+  publicEndpoint: https://uploads.example.test
+api:
+  trustedProxyCidrs: ['10.244.0.0/16', 'fd00:10:244::/48']
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 60
+  env:
+    AUTH_RATE_LIMIT_MAX: 40
+web:
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 60
+worker:
+  asr:
+    provider: whisper-http
+    whisperUrl: http://whisper.asr.svc:8080
+  mediaMaxInputBytes: 1073741824
+  scratch:
+    sizeLimit: 4Gi
+secrets:
+  migrate:
+    existingSecret: our-stream-pg-app
+    key: uri
+ingress:
+  className: nginx
+  hosts:
+    - host: stream.example.test
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: stream-example-test-tls
+      hosts: [stream.example.test]
+networkPolicy:
+  enabled: true
+  ingressNamespaceSelector:
+    kubernetes.io/metadata.name: ingress-nginx
+  ingressPodSelector:
+    app.kubernetes.io/name: ingress-nginx
+postgresql:
+  cloudnativepg:
+    enabled: true
+    instances: 2
+    storage:
+      storageClass: standard
+devStorage:
+  enabled: true
+  storage:
+    storageClass: standard
+gatewayApi:
+  enabled: true
+  parentRefs:
+    - name: public-gateway
+      namespace: gateway-system

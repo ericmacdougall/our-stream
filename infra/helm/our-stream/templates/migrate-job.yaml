@@ -1,0 +1,95 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Schema migrations as the owner role (ADR-0012). This Job is the only workload that can see the admin
+# connection string; api and worker never get it (ADR-0001). Migrations are forward-only: `helm rollback`
+# rolls the images back but not the schema (docs/deployment.md).
+#
+# Hook timing: pre-install/pre-upgrade so the schema is current before the pods roll. When the chart renders
+# the database itself (postgresql.cloudnativepg.enabled) the Cluster does not exist at pre-install time, so
+# the first run happens post-install and upgrades stay pre-upgrade. The Job uses the namespace's default
+# ServiceAccount because hook resources run before the chart's own ServiceAccount exists.
+{{- $hooks := "pre-install,pre-upgrade" }}
+{{- if .Values.postgresql.cloudnativepg.enabled }}{{ $hooks = "post-install,pre-upgrade" }}{{ end }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "our-stream.fullname" . }}-migrate
+  labels:
+    {{- include "our-stream.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
+  annotations:
+    helm.sh/hook: {{ $hooks }}
+    helm.sh/hook-weight: '0'
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.migrate.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.migrate.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "our-stream.selectorLabels" (dict "root" . "component" "migrate") | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+        # Wait until the database accepts TCP connections (the image has node but no psql).
+        - name: wait-for-database
+          image: {{ include "our-stream.image" (dict "root" . "component" "api") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          command:
+            - node
+            - -e
+            - |
+              let u;
+              try { u = new URL(process.env.DATABASE_ADMIN_URL); }
+              catch { console.error('DATABASE_ADMIN_URL is not a valid URL (value withheld)'); process.exit(1); }
+              const net = require('node:net');
+              const port = Number(u.port || 5432);
+              const deadline = Date.now() + {{ .Values.migrate.waitForDatabaseSeconds }} * 1000;
+              const attempt = () => {
+                const s = net.connect({ host: u.hostname, port }, () => { s.end(); process.exit(0); });
+                s.on('error', () => {
+                  s.destroy();
+                  if (Date.now() > deadline) { console.error('database not reachable'); process.exit(1); }
+                  setTimeout(attempt, 2000);
+                });
+              };
+              attempt();
+          env:
+            - name: DATABASE_ADMIN_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.migrate.existingSecret }}
+                  key: {{ .Values.secrets.migrate.key }}
+          resources:
+            {{- toYaml .Values.migrate.resources | nindent 12 }}
+      containers:
+        - name: migrate
+          image: {{ include "our-stream.image" (dict "root" . "component" "api") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          command: ['node', 'dist/cli.js', 'migrate']
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: DATABASE_ADMIN_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.migrate.existingSecret }}
+                  key: {{ .Values.secrets.migrate.key }}
+          resources:
+            {{- toYaml .Values.migrate.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 64Mi }

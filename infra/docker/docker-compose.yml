@@ -1,12 +1,25 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Development and evaluation stack. Not hardened for production; see infra/helm for Kubernetes.
 # Usage: docker compose -f infra/docker/docker-compose.yml up
-# web and api bind to 127.0.0.1 by default; set BIND_ADDR=0.0.0.0 to expose them. Postgres, S3 and the mail
-# catcher always stay on loopback because the evaluation stack uses default credentials.
+# Browsers talk to one origin: the `edge` reverse proxy (Caddy) on 127.0.0.1:${WEB_PORT}. It sends /api and
+# /media to the api and everything else to web. The edge and api bind to 127.0.0.1 by default; set
+# BIND_ADDR=0.0.0.0 to expose them. Postgres, S3 and the mail catcher always stay on loopback because the
+# evaluation stack uses default credentials.
+# Trust chain for client addresses (docs/deployment.md "Trust chain"): the edge discards a client-supplied
+# X-Forwarded-For and sets it to the TCP peer; the api trusts exactly one address, the edge's static
+# EDGE_ADDRESS on the `edge` network. Nothing else (web, the Docker gateway, another container) is trusted.
+# Run two copies of this stack on one host with different EDGE_SUBNET/EDGE_ADDRESS values.
 name: our-stream
 
+x-edge-subnet: &edge-subnet ${EDGE_SUBNET:-10.228.0.0/24}
+x-edge-gateway: &edge-gateway ${EDGE_GATEWAY:-10.228.0.1}
+x-edge-ip-range: &edge-ip-range ${EDGE_IP_RANGE:-10.228.0.0/25}
+x-edge-address: &edge-address ${EDGE_ADDRESS:-10.228.0.254}
+
 x-app-env: &app-env
-  NODE_ENV: development
+  # `development` accepts the dev-only secrets below; `production` refuses them and requires an https
+  # APP_BASE_URL (apps/api/src/config.ts). This file is an evaluation stack either way (docs/deployment.md).
+  NODE_ENV: ${NODE_ENV:-development}
   DATABASE_URL: postgres://ourstream_app:${APP_DB_PASSWORD:-ourstream-app-dev-only}@postgres:5432/ourstream
   DATABASE_PLATFORM_URL: postgres://ourstream_platform:${PLATFORM_DB_PASSWORD:-ourstream-platform-dev-only}@postgres:5432/ourstream
   S3_ENDPOINT: http://storage:8333
@@ -15,8 +28,11 @@ x-app-env: &app-env
   S3_ACCESS_KEY: ${S3_ACCESS_KEY:-ourstream-dev}
   S3_SECRET_KEY: ${S3_SECRET_KEY:-ourstream-dev-secret-only}
   S3_FORCE_PATH_STYLE: 'true'
+  # Browsers PUT upload parts straight to object storage, so presigned upload URLs are signed against this
+  # host-reachable address (the storage service's loopback port) instead of the internal S3_ENDPOINT.
+  S3_PUBLIC_ENDPOINT: http://localhost:${S3_PORT:-8333}
   SMTP_URL: smtp://mailcatcher:1025
-  APP_BASE_URL: http://localhost:${WEB_PORT:-3000}
+  APP_BASE_URL: ${APP_BASE_URL:-http://localhost:${WEB_PORT:-3000}}
   API_BASE_URL: http://localhost:${API_PORT:-4000}
   SESSION_SECRET: ${SESSION_SECRET:-dev-only-session-secret-change-me-0123456789}
   MEDIA_HMAC_SECRET: ${MEDIA_HMAC_SECRET:-dev-only-media-secret-change-me-0123456789}
@@ -40,6 +56,7 @@ services:
       ]
     ports:
       - '127.0.0.1:${POSTGRES_PORT:-5432}:5432'
+    networks: [backend]
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
@@ -63,6 +80,7 @@ services:
       ]
     ports:
       - '127.0.0.1:${S3_PORT:-8333}:8333'
+    networks: [backend]
     volumes:
       - storage-data:/data
       - ./seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
@@ -79,6 +97,7 @@ services:
     image: axllent/mailpit:v1.28
     ports:
       - '127.0.0.1:${MAILPIT_PORT:-8025}:8025'
+    networks: [backend]
     environment:
       MP_SMTP_AUTH_ACCEPT_ANY: '1'
       MP_SMTP_AUTH_ALLOW_INSECURE: '1'
@@ -91,6 +110,7 @@ services:
     environment:
       <<: *app-env
       DATABASE_ADMIN_URL: postgres://ourstream_admin:${POSTGRES_PASSWORD:-ourstream-dev-only}@postgres:5432/ourstream
+    networks: [backend]
     depends_on:
       postgres:
         condition: service_healthy
@@ -102,11 +122,15 @@ services:
     environment:
       <<: *app-env
       PORT: '4000'
-      # TRUST_PROXY stays false: the web container's Next.js rewrites forward X-Forwarded-For as the
-      # browser sent it without appending the peer, so trusting it would let clients pick their own
-      # address. Set it to your ingress CIDR only when that ingress appends the peer (docs/development.md).
+      # Exactly one trusted hop: the edge. Never `true`, never a range that includes web or the Docker
+      # gateway (docs/deployment.md "Trust chain").
+      TRUST_PROXY: ${EDGE_ADDRESS:-10.228.0.254}/32
+      S3_CORS_ORIGINS: ${S3_CORS_ORIGINS:-}
     ports:
       - '${BIND_ADDR:-127.0.0.1}:${API_PORT:-4000}:4000'
+    networks: [edge, backend]
+    read_only: true
+    tmpfs: [/tmp]
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -137,11 +161,28 @@ services:
       WHISPER_URL: http://whisper:8080
       FFMPEG_THREADS: ${FFMPEG_THREADS:-4}
       MEDIA_MAX_INPUT_BYTES: ${MEDIA_MAX_INPUT_BYTES:-4294967296}
+    networks: [backend]
+    read_only: true
+    # Media scratch space (WORKER_TMP_DIR) and ffmpeg's temp files live in memory-backed mounts; bind a
+    # volume at /var/tmp/ourstream instead when inputs approach MEDIA_MAX_INPUT_BYTES.
+    tmpfs: [/tmp, /var/tmp/ourstream]
     depends_on:
       migrate:
         condition: service_completed_successfully
       storage:
         condition: service_healthy
+    healthcheck:
+      # GET /health on WORKER_HEALTH_PORT answers 200 while pg-boss is up and the outbox drains.
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:4001/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 30
 
   whisper:
     # Self-hosted ASR sidecar (MIT, ggml-org/whisper.cpp). Only started with `--profile whisper`.
@@ -162,6 +203,7 @@ services:
         '-t',
         '${WHISPER_THREADS:-4}',
       ]
+    networks: [backend]
     volumes:
       - whisper-models:/models
     healthcheck:
@@ -177,15 +219,66 @@ services:
     environment:
       NODE_ENV: production
       PORT: '3000'
+      # Build-time rewrite target (web.Dockerfile ARG); unused at runtime because the edge routes /api and
+      # /media to the api before they reach web.
       API_INTERNAL_URL: http://api:4000
       NEXT_PUBLIC_API_URL: http://localhost:${API_PORT:-4000}
-    ports:
-      - '${BIND_ADDR:-127.0.0.1}:${WEB_PORT:-3000}:3000'
+    # No host port on purpose: web is only reachable through the edge. Its /api and /media rewrites still
+    # work (used by `next dev`), but the edge routes those paths to the api before they reach web.
+    networks: [edge]
+    read_only: true
+    tmpfs: [/tmp, /app/apps/web/.next/cache]
     depends_on:
       api:
         condition: service_healthy
+
+  edge:
+    # The one origin browsers use. Caddy sets X-Forwarded-For to the peer it accepted the connection
+    # from and ignores whatever the client sent (its trusted_proxies list is empty): infra/docker/caddy.
+    image: caddy:2.11.7
+    ports:
+      - '${BIND_ADDR:-127.0.0.1}:${WEB_PORT:-3000}:3000'
+    networks:
+      edge:
+        ipv4_address: *edge-address
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    # The image runs as root (its /data and /config volumes are root-owned). The caddy binary carries the
+    # file capability cap_net_bind_service, so with no-new-privileges that capability must stay in the
+    # bounding set or exec fails with "operation not permitted"; everything else is dropped.
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ['no-new-privileges:true']
+    depends_on:
+      web:
+        condition: service_started
+      api:
+        condition: service_healthy
+    healthcheck:
+      # BusyBox wget (Alpine image) treats a 2xx/3xx from web as success.
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:3000/']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+networks:
+  # Only edge, web and api. The subnet is fixed so the edge can have the static address the api trusts.
+  # Dynamic addresses (web, api) come from the lower half, the edge sits outside it, and the gateway is fixed
+  # too: Docker would otherwise pick one, and it is the source address of host-published-port traffic, which
+  # must never be trusted.
+  edge:
+    ipam:
+      config:
+        - subnet: *edge-subnet
+          ip_range: *edge-ip-range
+          gateway: *edge-gateway
+  backend:
 
 volumes:
   postgres-data:
   storage-data:
   whisper-models:
+  caddy-data:
+  caddy-config:

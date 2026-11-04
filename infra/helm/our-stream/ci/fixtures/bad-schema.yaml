@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Failing control for kubeconform -strict: an unknown field in a core resource.
+apiVersion: v1
+kind: Service
+metadata:
+  name: bad-service
+spec:
+  type: ClusterIP
+  portz:
+    - port: 80
