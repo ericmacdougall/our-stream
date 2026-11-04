@@ -299,19 +299,12 @@ export function Feed({ streamId }: { streamId?: string }) {
         <Notice kind="error">{error}</Notice>
       </div>
       <div className="feed-controls" role="toolbar" aria-label={t('feed.controls')}>
-        <button
-          type="button"
-          onClick={togglePlay}
-          aria-pressed={!shouldPlayActive}
-          data-testid="toggle-play"
-          disabled={!activeItem}
-        >
+        <button type="button" onClick={togglePlay} data-testid="toggle-play" disabled={!activeItem}>
           {shouldPlayActive ? t('feed.pause') : t('feed.play')}
         </button>
         <button
           type="button"
           onClick={() => dispatch({ type: 'toggleMute' })}
-          aria-pressed={!settings.muted}
           data-testid="toggle-mute"
         >
           {settings.muted ? t('feed.unmute') : t('feed.mute')}
@@ -319,7 +312,6 @@ export function Feed({ streamId }: { streamId?: string }) {
         <button
           type="button"
           onClick={() => dispatch({ type: 'toggleCaptions' })}
-          aria-pressed={settings.captions}
           data-testid="toggle-captions"
         >
           {settings.captions ? t('feed.captionsOff') : t('feed.captionsOn')}

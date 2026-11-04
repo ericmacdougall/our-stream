@@ -39,11 +39,19 @@ test('arrows, J/K, Space, C and M drive the feed; shortcuts can be disabled', as
 
   // C toggles captions, M toggles mute.
   const captions = page.getByTestId('toggle-captions');
-  await expect(captions).toHaveAttribute('aria-pressed', 'true');
+  await expect(captions).toHaveText('Captions off');
   await page.keyboard.press('c');
-  await expect(captions).toHaveAttribute('aria-pressed', 'false');
+  await expect(captions).toHaveText('Captions on');
+  await expect(feedItem(page, second).getByTestId('feed-video')).toHaveJSProperty(
+    'textTracks.0.mode',
+    'hidden',
+  );
   await page.keyboard.press('c');
-  await expect(captions).toHaveAttribute('aria-pressed', 'true');
+  await expect(captions).toHaveText('Captions off');
+  await expect(feedItem(page, second).getByTestId('feed-video')).toHaveJSProperty(
+    'textTracks.0.mode',
+    'showing',
+  );
   const mute = page.getByTestId('toggle-mute');
   await expect(mute).toHaveText('Unmute');
   await page.keyboard.press('m');

@@ -13,10 +13,9 @@ export function apiBaseUrl(): string {
 /** A typed client bound to the current request's cookies. */
 export async function serverApi(): Promise<ApiClient> {
   const jar = await cookies();
-  const cookieHeader = jar
-    .getAll()
-    .map((c) => `${c.name}=${c.value}`)
-    .join('; ');
+  // Least privilege: only the session cookie travels to the API, never unrelated cookies.
+  const session = jar.get(SESSION_COOKIE);
+  const cookieHeader = session ? `${SESSION_COOKIE}=${session.value}` : '';
   return createClient({
     baseUrl: apiBaseUrl(),
     fetch: (input, init) => {

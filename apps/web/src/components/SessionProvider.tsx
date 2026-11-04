@@ -13,9 +13,11 @@ export function useSession(): Me | null {
 }
 
 export function SessionProvider({ me, children }: { me: Me | null; children: ReactNode }) {
-  setCsrfToken(me?.csrfToken ?? null);
+  // Effect only: during server rendering this module is shared by every request, so the token
+  // must never be written there.
   useEffect(() => {
     setCsrfToken(me?.csrfToken ?? null);
+    return () => setCsrfToken(null);
   }, [me]);
 
   useEffect(() => {

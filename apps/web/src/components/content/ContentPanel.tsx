@@ -8,6 +8,7 @@ import type { ContentDetail } from '@our-stream/contracts';
 import { browserApi } from '@/lib/api/client';
 import { errorMessage } from '@/lib/errors';
 import { formatTimestamp } from '@/lib/feed/chapters';
+import { externalHost } from '@/lib/links';
 import { t, type MessageId } from '@/lib/i18n';
 import { Notice } from '../Notice';
 import { UploadFlow } from '../upload/UploadFlow';
@@ -160,9 +161,13 @@ export function ContentPanel({ initial }: { initial: Detail }) {
                 <ul className="list">
                   {detail.links.map((l) => (
                     <li key={l.url}>
-                      <a href={l.url} rel="noopener noreferrer">
-                        {l.label || l.url}
-                      </a>
+                      {externalHost(l.url) === null ? (
+                        <span>{l.label || t('feed.linkUnavailable')}</span>
+                      ) : (
+                        <a href={l.url} rel="noopener noreferrer">
+                          {l.label || l.url}
+                        </a>
+                      )}
                     </li>
                   ))}
                 </ul>

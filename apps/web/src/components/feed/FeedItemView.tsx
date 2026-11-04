@@ -5,6 +5,7 @@ import { forwardRef, useRef, useState } from 'react';
 import type { z } from 'zod';
 import type { FeedItem } from '@our-stream/contracts';
 import { activeChapterIndex, formatTimestamp } from '@/lib/feed/chapters';
+import { externalHost } from '@/lib/links';
 import type { FeedSettings } from '@/lib/feed/settings';
 import { t } from '@/lib/i18n';
 import { Player, type PlayerHandle } from './Player';
@@ -132,7 +133,10 @@ export const FeedItemView = forwardRef<HTMLElement, FeedItemViewProps>(function 
           <ul className="feed-links" aria-label={t('upload.links')}>
             {item.links.map((l) => (
               <li key={l.url}>
-                {l.kind === 'internet' ? (
+                {externalHost(l.url) === null ? (
+                  // Not http(s): never render as a clickable link (javascript:, data:, ...).
+                  <span>{l.label || t('feed.linkUnavailable')}</span>
+                ) : l.kind === 'internet' ? (
                   <a
                     href={l.url}
                     rel="noopener noreferrer"

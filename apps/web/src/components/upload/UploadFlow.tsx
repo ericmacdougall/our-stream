@@ -64,6 +64,16 @@ export function UploadFlow({ replaceOf }: { replaceOf?: Detail }) {
       setError(t('upload.chapterInvalid', { value: badChapter.at }));
       return;
     }
+    const halfChapter = chapters.findIndex((c) => (c.at.trim() === '') !== (c.title.trim() === ''));
+    if (halfChapter >= 0) {
+      setError(t('upload.chapterIncomplete', { n: halfChapter + 1 }));
+      return;
+    }
+    const halfLink = links.findIndex((l) => l.url.trim() === '' && l.label.trim() !== '');
+    if (halfLink >= 0) {
+      setError(t('upload.linkIncomplete', { n: halfLink + 1 }));
+      return;
+    }
     busy.current = true;
     try {
       let target: Detail;
