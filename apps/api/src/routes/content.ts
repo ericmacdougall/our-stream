@@ -259,13 +259,13 @@ export function registerContentRoutes(fastify: FastifyInstance, ctx: AppContext)
         tags: ['content'],
         params: Params,
         body: UploadCompleteRequest,
-        response: { 200: Ok },
+        response: { 200: ContentDetail },
         security,
       },
     },
     async (req) => {
       const auth = requireMember(req);
-      await withTenant(ctx.pool, { orgId: auth.orgId, userId: auth.userId }, async (client) => {
+      return withTenant(ctx.pool, { orgId: auth.orgId, userId: auth.userId }, async (client) => {
         await requireAuthor(client, req.params.id);
         const v = await client.query<{
           original_key: string;
@@ -301,8 +301,9 @@ export function registerContentRoutes(fastify: FastifyInstance, ctx: AppContext)
           [auth.orgId, req.body.versionId],
         );
         await emit(client, 'content.version_uploaded', req.params.id, req.body.versionId, {});
+        // Clients poll the detail after completion; return it so the uploaded version is in hand immediately.
+        return (await loadContent(client, req.params.id)).detail;
       });
-      return { ok: true as const };
     },
   );
 
