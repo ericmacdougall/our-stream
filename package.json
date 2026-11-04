@@ -20,6 +20,7 @@
     "db:migrate": "pnpm --filter @our-stream/db migrate",
     "db:lint": "pnpm --filter @our-stream/db schema:lint",
     "headers:check": "node scripts/check-headers.mjs",
+    "dockerfiles:check": "node scripts/check-dockerfiles.mjs",
     "licenses:check": "node scripts/check-licenses.mjs",
     "contracts:generate": "pnpm --filter @our-stream/api openapi:emit && pnpm --filter @our-stream/contracts generate"
   },

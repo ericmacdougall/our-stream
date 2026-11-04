@@ -47,7 +47,9 @@ spec:
             - node
             - -e
             - |
-              const u = new URL(process.env.DATABASE_ADMIN_URL);
+              let u;
+              try { u = new URL(process.env.DATABASE_ADMIN_URL); }
+              catch { console.error('DATABASE_ADMIN_URL is not a valid URL (value withheld)'); process.exit(1); }
               const net = require('node:net');
               const port = Number(u.port || 5432);
               const deadline = Date.now() + {{ .Values.migrate.waitForDatabaseSeconds }} * 1000;

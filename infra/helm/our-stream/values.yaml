@@ -23,11 +23,13 @@ secrets:
   app:
     # Secret with keys DATABASE_URL (ourstream_app role), DATABASE_PLATFORM_URL (ourstream_platform role),
     # S3_ACCESS_KEY, S3_SECRET_KEY, SESSION_SECRET (>=32 chars), MEDIA_HMAC_SECRET (>=32 chars, different
-    # from SESSION_SECRET) and optionally SMTP_URL. Loaded with envFrom into api and worker only.
+    # from SESSION_SECRET) and optionally SMTP_URL. Each workload reads only the keys it needs (explicit
+    # secretKeyRef, never envFrom): api gets no platform URL, worker gets no session secrets.
     existingSecret: our-stream-app
   migrate:
     # Secret holding the admin (schema owner) connection string. Mounted by the migrate Job and nothing else.
-    # With the CloudNativePG option below, use `<release>-our-stream-pg-app` and key `uri`.
+    # With the CloudNativePG option below, use the operator-generated `<fullname>-pg-app` Secret and key `uri`
+    # (for release `our-stream` that is `our-stream-pg-app`).
     existingSecret: our-stream-migrate
     key: DATABASE_ADMIN_URL
 
@@ -51,10 +53,12 @@ api:
   # Rate budgets are per process (ADR-0004): N replicas means N x AUTH_RATE_LIMIT_MAX for an attacker who
   # spreads requests, so stay at 1 until a shared store lands; the chart warns above 1.
   replicaCount: 1
-  # TRUST_PROXY, as CIDRs only (`true`, `/0` and prefixes broader than /8 are rejected by the schema and the
-  # template). /api and /media are routed to the api at the Ingress, so the api's TCP peer is the ingress
-  # controller pod: list the address range those pods use (often the whole pod CIDR). Keep networkPolicy on
-  # so no other pod can reach the api with a forged header. Empty renders TRUST_PROXY=false and NOTES warn.
+  # TRUST_PROXY, as CIDRs only (`true`, `/0`, prefixes broader than /8 and IPv4-mapped IPv6 are rejected by
+  # the schema and the template). /api and /media are routed to the api at the Ingress, so the api's TCP peer
+  # is the ingress controller pod: list the address range those pods use. If that range also contains the web
+  # pods (a shared pod CIDR), the chain holds only because web cannot reach the api at all (NetworkPolicy)
+  # and /api and /media never reach web (the template refuses a routing that would); keep both on. Empty
+  # renders TRUST_PROXY=false and NOTES warn.
   trustedProxyCidrs: []
   logLevel: info
   # Extra non-secret environment (name: value). Never put credentials here.
@@ -167,8 +171,9 @@ gatewayApi:
   #   namespace: gateway-system
 
 networkPolicy:
-  # Default-deny ingress for every pod of the release; web accepts only the ingress controller, api only web.
-  # Egress is not restricted by this skeleton.
+  # Default-deny ingress for every pod of the release; web and api accept only the ingress controller. Web is
+  # deliberately not allowed to reach the api: its build-time rewrites would otherwise forward a forged
+  # X-Forwarded-For from inside the trusted range. Egress is not restricted by this skeleton.
   enabled: true
   # Selects the namespace the ingress controller (or Gateway data plane) runs in. Must not be empty: an empty
   # selector would match every namespace, so the template refuses it.
@@ -208,11 +213,12 @@ postgresql:
     storage:
       size: 20Gi
       storageClass: ''
-    # kubernetes.io/basic-auth Secrets (keys username, password). The owner becomes ourstream_admin; CNPG writes
-    # its connection URI to `<release>-our-stream-pg-app` (key `uri`) for `secrets.migrate`.
-    ownerSecret: our-stream-pg-admin
-    appRoleSecret: our-stream-pg-app
-    platformRoleSecret: our-stream-pg-platform
+    # The operator generates the owner (ourstream_admin) credentials itself in `<fullname>-pg-app` (keys
+    # username, password, uri, ...); point `secrets.migrate` at that Secret with key `uri`. The two application
+    # roles take their passwords from these kubernetes.io/basic-auth Secrets (keys username, password), which
+    # you create; the names must not collide with `<fullname>-pg-app`.
+    appRoleSecret: our-stream-pg-role-app
+    platformRoleSecret: our-stream-pg-role-platform
 
 devStorage:
   # Single-replica SeaweedFS with its S3 gateway for evaluation clusters only (no replication, no backups).

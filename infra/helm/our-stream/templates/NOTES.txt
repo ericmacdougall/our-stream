@@ -10,7 +10,7 @@ Secrets referenced (create them before installing):
   {{ .Values.secrets.app.existingSecret }}      keys DATABASE_URL, DATABASE_PLATFORM_URL, S3_ACCESS_KEY, S3_SECRET_KEY, SESSION_SECRET, MEDIA_HMAC_SECRET[, SMTP_URL]
   {{ .Values.secrets.migrate.existingSecret }}  key {{ .Values.secrets.migrate.key }} (migrate Job only)
 {{- if .Values.postgresql.cloudnativepg.enabled }}
-  {{ .Values.postgresql.cloudnativepg.ownerSecret }}, {{ .Values.postgresql.cloudnativepg.appRoleSecret }}, {{ .Values.postgresql.cloudnativepg.platformRoleSecret }}  (basic-auth: username, password)
+  {{ .Values.postgresql.cloudnativepg.appRoleSecret }}, {{ .Values.postgresql.cloudnativepg.platformRoleSecret }}  (basic-auth: username, password); the operator writes the owner URI to {{ include "our-stream.fullname" . }}-pg-app
 {{- end }}
 {{- if .Values.devStorage.enabled }}
   {{ .Values.devStorage.existingSecret }}  key s3.json

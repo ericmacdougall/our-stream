@@ -7,13 +7,14 @@
 # and /media go straight to the api so the web container's Next.js rewrites, which forward X-Forwarded-For
 # unchanged, are never on the path the api trusts. Only the edge publishes a host port.
 #
-# EDGE_SITE_ADDRESS defaults to plain HTTP on :3000. Set it to a public name (https://stream.example.com),
-# publish 80/443 and change APP_BASE_URL with it to get Caddy's automatic TLS; see docs/deployment.md.
+# Plain HTTP on :3000 behind the loopback host port. TLS for a public install is a Kubernetes Ingress
+# concern (docs/deployment.md); this evaluation stack does not terminate TLS.
 {
 	admin off
+	auto_https off
 }
 
-{$EDGE_SITE_ADDRESS::3000} {
+:3000 {
 	# The api answers /v1/*, /health and /media/*; the browser addresses it as /api/* on this origin.
 	handle_path /api/* {
 		reverse_proxy api:4000 {

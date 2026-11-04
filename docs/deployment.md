@@ -56,14 +56,14 @@ otherwise choose one and it is the source address of host-published-port traffic
 | `EDGE_GATEWAY`                                                                                                                          | `10.228.0.1`        | Gateway of the `edge` network                                                                      |
 | `EDGE_IP_RANGE`                                                                                                                         | `10.228.0.0/25`     | Dynamic range for web and api                                                                      |
 | `EDGE_ADDRESS`                                                                                                                          | `10.228.0.254`      | Static edge address; `TRUST_PROXY` is `${EDGE_ADDRESS}/32`                                         |
-| `EDGE_SITE_ADDRESS`                                                                                                                     | `:3000`             | Caddy site address; a public `https://name` turns on automatic TLS                                 |
 | `S3_CORS_ORIGINS`                                                                                                                       | (from APP_BASE_URL) | Browser origins allowed to upload parts directly                                                   |
 | `POSTGRES_PASSWORD`, `APP_DB_PASSWORD`, `PLATFORM_DB_PASSWORD`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `SESSION_SECRET`, `MEDIA_HMAC_SECRET` | dev-only values     | Override all of them for anything but local evaluation; the API refuses the defaults in production |
 
-TLS with Caddy: set `EDGE_SITE_ADDRESS=https://stream.example.com`, publish 80 and 443 to the edge (an
-override file with `ports: ['80:80', '443:443']`), set `APP_BASE_URL=https://stream.example.com` and
-`S3_CORS_ORIGINS` to match, and keep the `caddy-data` volume so certificates survive restarts. This path is
-documented, not exercised by the repository's checks.
+TLS: the compose edge serves plain HTTP on a loopback port and does not terminate TLS; a public install
+belongs on Kubernetes (Ingress TLS below). Running compose with `NODE_ENV=production` is possible (the API
+then refuses every dev-only secret and requires an https `APP_BASE_URL`), but putting a TLS terminator in
+front of the edge needs that terminator to set `X-Forwarded-For` and Caddy to trust it
+(`trusted_proxies`), which this file does not configure.
 
 Verified on the evaluation stack (dev2, 2026-11-04): a request through the edge with
 `X-Forwarded-For: 203.0.113.9` is logged by the API with the host's address; the same header sent straight
@@ -74,16 +74,19 @@ and the same probe with a deliberately misconfigured `TRUST_PROXY=true` never re
 
 Browser uploads: presigned upload-part URLs are signed against `S3_PUBLIC_ENDPOINT`
 (`http://localhost:${S3_PORT}` in compose, the storage service's loopback port), while api and worker keep
-using the internal `S3_ENDPOINT`. The API setting lands with the M1b API branch; until then the compose
-value is ignored and uploads from a browser need the API started with a host-reachable `S3_ENDPOINT`.
+using the internal `S3_ENDPOINT`. There is deliberately no `/storage` route on the edge: SigV4 signs the
+request path, so a prefix-stripping hop would invalidate every presigned URL.
 
 ## Kubernetes (Helm)
 
 ```sh
 helm lint infra/helm/our-stream
 helm template our-stream infra/helm/our-stream -f my-values.yaml | less
-helm upgrade --install our-stream infra/helm/our-stream -n our-stream --create-namespace -f my-values.yaml
+helm upgrade --install our-stream infra/helm/our-stream -n our-stream --create-namespace -f my-values.yaml --timeout 20m
 ```
+
+`--timeout` must cover the migrate hook: it waits up to `migrate.waitForDatabaseSeconds` for the database and
+then runs the migrations (`migrate.activeDeadlineSeconds`).
 
 Prerequisites: images for api, web and worker pushed to a registry you control (no public images are
 published yet; `image.registry`/`image.repository`/`image.tag`), Postgres 17 with pgvector, S3-compatible
@@ -96,39 +99,53 @@ What the chart deploys:
   seccomp `RuntimeDefault`, all capabilities dropped, no privilege escalation, read-only root filesystem
   with emptyDirs for `/tmp`, the web `.next/cache` and the worker scratch space). Probes: api readiness
   `GET /health` (database-dependent) and TCP liveness; web `GET /sign-in`; worker startup and liveness on
-  its `GET /health` (`WORKER_HEALTH_PORT` 4001, 200 while pg-boss is up and the outbox drains; this
-  endpoint lands with the M1b API branch, so the probe is unverified until that branch is merged).
-- A `migrate` Job (`node dist/cli.js migrate` from the api image) as a `pre-install,pre-upgrade` hook. It
-  is the only workload that receives `DATABASE_ADMIN_URL`, waits for the database port, and runs with the
-  namespace's default ServiceAccount because hooks run before the chart's own ServiceAccount exists.
+  its `GET /health` (`WORKER_HEALTH_PORT` 4001, bound to all interfaces with `HOST=0.0.0.0`; 200 while
+  pg-boss is up and the outbox drains, 503 otherwise).
+- A `migrate` Job (`node dist/cli.js migrate` from the api image) as a `pre-install,pre-upgrade` hook
+  (`post-install,pre-upgrade` when the chart renders the CloudNativePG cluster, which does not exist before
+  install; the api is then Ready against an empty schema until the hook finishes). It is the only workload
+  that receives `DATABASE_ADMIN_URL`, waits for the database port, and runs with the namespace's default
+  ServiceAccount because hooks run before the chart's own ServiceAccount exists.
   Migrations are forward-only: `helm rollback` restores the previous images, not the schema, so follow the
   expand/contract rule in ADR-0012.
 - Services for api and web; an Ingress sending `/media` to the api and everything else to web, plus a second
   Ingress for `/api` with a prefix-stripping rewrite (ingress-nginx annotations by default, overridable), or
   a Gateway API `HTTPRoute` with a standard `URLRewrite` (`gatewayApi.enabled`).
-- NetworkPolicy (on by default): default-deny ingress for the release's pods, web and api reachable from the
-  ingress controller namespace (`networkPolicy.ingressNamespaceSelector`), api also from web. Egress is not
-  restricted.
+- NetworkPolicy (on by default): default-deny ingress for the release's pods; web and api reachable only
+  from the ingress controller namespace (`networkPolicy.ingressNamespaceSelector`, required to be
+  non-empty). Web is deliberately not allowed to reach the api: its build-time rewrites forward
+  `X-Forwarded-For` unchanged, so if a controller ever routed `/api` to web (for example one that treats the
+  ingress-nginx regex path literally), the request fails instead of arriving from inside the trusted range
+  with a forged header. The template also refuses a values file with no `/api` route to the api or a web
+  path under `/api` or `/media`. Egress is not restricted.
 - Optional HPAs for api and web, off by default. Leave the api at one replica until budgets have a shared
   store.
 - Optional in-cluster dependencies for evaluation: a CloudNativePG `Cluster` (operator required; the image
-  must ship pgvector) with the three roles from `infra/docker/postgres/init/01-roles.sh`, and a single-pod
-  SeaweedFS StatefulSet. Production installs use external Postgres and object storage.
+  must ship pgvector) with the three roles from `infra/docker/postgres/init/01-roles.sh`; the operator
+  generates the owner credentials in `<fullname>-pg-app` (key `uri`), which is what `secrets.migrate`
+  points at, and the two application roles take passwords from Secrets you create. Also a single-pod
+  SeaweedFS StatefulSet. Production installs use external Postgres and object storage. Neither has been
+  exercised against a live operator in this repository.
 
 Secrets are referenced, never written in values:
 
 | Secret (`secrets.*.existingSecret`) | Keys                                                                                                                                  | Consumers                                               |
 | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
 | `app`                               | `DATABASE_URL`, `DATABASE_PLATFORM_URL`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `SESSION_SECRET`, `MEDIA_HMAC_SECRET`, optional `SMTP_URL` | api (not the platform URL), worker (no session secrets) |
-| `migrate`                           | `key` (default `DATABASE_ADMIN_URL`; with CloudNativePG use the operator's `<release>-our-stream-pg-app` Secret and key `uri`)        | migrate Job only                                        |
+| `migrate`                           | `key` (default `DATABASE_ADMIN_URL`; with CloudNativePG use the operator's `<fullname>-pg-app` Secret and key `uri`)                  | migrate Job only                                        |
 
 Each workload gets explicit `secretKeyRef`s, so extra keys in a Secret never reach a pod that does not
 need them. `api.env` and `worker.env` refuse credential names.
 
-`api.trustedProxyCidrs` is `TRUST_PROXY`. Set it to the address range of the ingress controller pods (often
-the cluster's pod CIDR); with `/api` and `/media` routed at the ingress, the controller is the api's TCP
-peer. The chart renders `TRUST_PROXY=false` and warns when the list is empty. Make sure the controller does
-not trust client-supplied headers (ingress-nginx `use-forwarded-headers=false`, the default).
+`api.trustedProxyCidrs` is `TRUST_PROXY`. Set it to the address range of the ingress controller pods; with
+`/api` and `/media` routed at the ingress, the controller is the api's TCP peer. If that range is the shared
+pod CIDR it also contains the web pods, which is acceptable only because web cannot reach the api
+(NetworkPolicy) and never receives `/api` or `/media` (template checks); a dedicated address pool or a
+host-network controller removes even that dependency. The chart refuses `true`, `/0`, prefixes broader
+than `/8` (IPv4) or `/16` (IPv6) and IPv4-mapped IPv6 ranges, renders `TRUST_PROXY=false` and warns when
+the list is empty. Make sure the controller does not trust client-supplied headers (ingress-nginx
+`use-forwarded-headers=false`, the default). The default `/api` rewrite annotations are ingress-nginx's;
+other controllers need their own (`ingress.api`) or the Gateway API route.
 
 Residency and model providers: the worker's provider policy defaults to self-host only with zero data
 retention required (`worker.providerPolicy`, ADR-0008); `worker.asr.provider` is `fake` or `whisper-http`
@@ -136,10 +153,13 @@ with `worker.asr.whisperUrl` pointing at a whisper.cpp server you run. Data resi
 you place Postgres, object storage and the cluster; the chart has no region logic (ADR-0008, roadmap M9).
 
 Checks: `infra/helm/our-stream/ci/check.sh` runs `helm lint`, `helm template` with default and
-all-options values, `kubeconform -strict` against pinned Kubernetes 1.34 schemas and a pinned CRD catalog,
-then asserts the rendering: expected resource counts per kind, non-root everywhere, no privileged or host
-namespaces, no `envFrom`, the admin URL only in the Job, `TRUST_PROXY` as CIDRs, no development secret
-literal (the list is read from `apps/api/src/config.ts` and the compose defaults). Each assertion has a
-failing control in the script. CI runs it (`.github/workflows/ci.yml`, job `helm`) with pinned,
-checksum-verified helm and kubeconform binaries. The chart has not been exercised against a live cluster in
+all-options values, `kubeconform -strict` against Kubernetes 1.34 schemas and a CRD catalog, both pinned to
+a commit, then asserts the rendering: expected resource counts per kind, non-root everywhere, no privileged
+or host namespaces, no `envFrom`, the admin URL only in the Job, `TRUST_PROXY` as safe CIDRs, `/api` and
+`/media` routed to the api and never to web, allow-policies naming a non-empty ingress namespace and never
+admitting web into the api, no development secret literal (the list is read from `apps/api/src/config.ts`
+and the compose defaults). Each assertion has a failing control in the script. CI runs it
+(`.github/workflows/ci.yml`, job `infra`) with pinned, checksum-verified helm and kubeconform binaries,
+and checks the compose trust chain on `docker compose config` output (`infra/docker/check-compose.py`:
+`TRUST_PROXY` equals the edge's static address `/32`, web publishes no port, read-only workloads). The chart has not been exercised against a live cluster in
 this repository; lint, schema validation and the invariants above are the evidence.

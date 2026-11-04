@@ -2,9 +2,11 @@
 {{- if .Values.networkPolicy.enabled }}
 # Skeleton: default-deny ingress for the pods of this release (selected by the chart's own labels, so
 # operator-owned pods such as CloudNativePG instances are untouched), then the allowed hops: web and api
-# from the ingress controller, api additionally from web (its rewrites, used by `next dev` and SSR). The
-# CNI must enforce NetworkPolicy for this to hold (kindnet and plain flannel do not). Egress is left open
-# (external Postgres, object storage, SMTP, ASR sidecars); tighten it per cluster.
+# from the ingress controller only. Web is not allowed to reach the api: its build-time rewrites forward
+# X-Forwarded-For unchanged, so a misrouted request would otherwise arrive from inside the trusted range
+# with a forged header; in the cluster, /api and /media are routed to the api before web. The CNI must
+# enforce NetworkPolicy for this to hold (kindnet and plain flannel do not). Egress is left open (external
+# Postgres, object storage, SMTP, ASR sidecars); tighten it per cluster.
 {{- if not .Values.networkPolicy.ingressNamespaceSelector }}
 {{- fail "networkPolicy.ingressNamespaceSelector must name the ingress controller's namespace (an empty selector would admit every namespace)" }}
 {{- end }}
@@ -49,7 +51,7 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ include "our-stream.fullname" . }}-api-from-ingress-and-web
+  name: {{ include "our-stream.fullname" . }}-api-from-ingress
   labels:
     {{- include "our-stream.labels" . | nindent 4 }}
 spec:
@@ -67,9 +69,6 @@ spec:
             matchLabels:
               {{- toYaml . | nindent 14 }}
           {{- end }}
-        - podSelector:
-            matchLabels:
-              {{- include "our-stream.selectorLabels" (dict "root" . "component" "web") | nindent 14 }}
       ports:
         - port: 4000
           protocol: TCP

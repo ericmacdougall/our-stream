@@ -69,7 +69,7 @@ docker compose -f infra/docker/docker-compose.yml up --build
 ```
 
 `localhost:3000` is the `edge` service (Caddy): it sends `/api/*` and `/media/*` to the api and everything
-else to web, which publishes no host port of its own. Ports, network addresses, TLS and the client-address
+else to web, which publishes no host port of its own. Ports, network addresses and the client-address
 trust chain are described in `docs/deployment.md`.
 
 ## Worker and media pipeline

@@ -8,7 +8,9 @@ set -euo pipefail
 CHART=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 ROOT=$(cd "$CHART/../../.." && pwd)
 K8S_VERSION=${K8S_VERSION:-1.34.0}
-# Pinned to a commit so a catalog change cannot silently alter what passes.
+# Both schema sources are pinned to a commit so an upstream change cannot silently alter what passes.
+CORE_SCHEMA_COMMIT=86d045595d3f93b703bbf439cf9eb4bd6830d58f
+CORE_SCHEMAS="https://raw.githubusercontent.com/yannh/kubernetes-json-schema/${CORE_SCHEMA_COMMIT}/{{.NormalizedKubernetesVersion}}-standalone{{.StrictSuffix}}/{{.ResourceKind}}{{.KindSuffix}}.json"
 CRD_CATALOG_COMMIT=6ab3493622cd387923a2d0da5234f53e80e1bd28
 CRD_CATALOG="https://raw.githubusercontent.com/datreeio/CRDs-catalog/${CRD_CATALOG_COMMIT}/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json"
 OUT=$(mktemp -d)
@@ -37,9 +39,9 @@ echo "== helm template"
 helm template our-stream "$CHART" --namespace our-stream > "$OUT/default.yaml"
 helm template our-stream "$CHART" --namespace our-stream -f "$CHART/ci/full-values.yaml" > "$OUT/full.yaml"
 
-echo "== kubeconform (Kubernetes $K8S_VERSION, CRD catalog @ ${CRD_CATALOG_COMMIT:0:7})"
+echo "== kubeconform (Kubernetes $K8S_VERSION, schemas @ ${CORE_SCHEMA_COMMIT:0:7}, CRD catalog @ ${CRD_CATALOG_COMMIT:0:7})"
 kubeconform -strict -summary -kubernetes-version "$K8S_VERSION" \
-  -schema-location default -schema-location "$CRD_CATALOG" \
+  -schema-location "$CORE_SCHEMAS" -schema-location "$CRD_CATALOG" \
   "$OUT/default.yaml" "$OUT/full.yaml"
 
 echo "== invariants on the renderings"
@@ -64,15 +66,19 @@ expect_failure() {
 expect_failure "trustedProxyCidrs=true" trustedProxyCidrs -- helm template our-stream "$CHART" --set 'api.trustedProxyCidrs={true}'
 expect_failure "trustedProxyCidrs=0.0.0.0/0" trustedProxyCidrs -- helm template our-stream "$CHART" --set 'api.trustedProxyCidrs={0.0.0.0/0}'
 expect_failure "trustedProxyCidrs=10.0.0.1" trustedProxyCidrs -- helm template our-stream "$CHART" --set 'api.trustedProxyCidrs={10.0.0.1}'
+expect_failure "trustedProxyCidrs=::ffff:0:0/96 (IPv4-mapped)" trustedProxyCidrs -- helm template our-stream "$CHART" --set 'api.trustedProxyCidrs={::ffff:0:0/96}'
+expect_failure "api.env.NODE_ENV override" NODE_ENV -- helm template our-stream "$CHART" --set 'api.env.NODE_ENV=development'
+expect_failure "no /api route at all" '/api' -- helm template our-stream "$CHART" --set 'ingress.api.enabled=false'
+expect_failure "/api path routed to web" 'must not route /api to web' -- helm template our-stream "$CHART" -f "$CHART/ci/fixtures/bad-web-api-path-values.yaml"
 expect_failure "api.env.SESSION_SECRET" SESSION_SECRET -- helm template our-stream "$CHART" --set 'api.env.SESSION_SECRET=x'
 expect_failure "scratch below 2x max input" scratch -- helm template our-stream "$CHART" --set 'worker.scratch.sizeLimit=1Gi'
 expect_failure "empty ingressNamespaceSelector" ingressNamespaceSelector -- helm template our-stream "$CHART" --set 'networkPolicy.ingressNamespaceSelector=null'
 # a rendering that violates the invariants is rejected for each reason it violates
-for needle in privileged hostNetwork DATABASE_ADMIN_URL TRUST_PROXY runAsNonRoot 'development secret' envFrom 'expected 1 x Job'; do
+for needle in privileged hostNetwork DATABASE_ADMIN_URL TRUST_PROXY runAsNonRoot 'development secret' envFrom 'expected 1 x Job' 'routed to web' 'every namespace' 'must not be allowed to reach the api'; do
   expect_failure "bad-rendered.yaml ($needle)" "$needle" -- python3 "$ASSERT" --expect Deployment=1 --expect Job=1 "$CHART/ci/fixtures/bad-rendered.yaml"
 done
 # an unknown field is rejected by kubeconform -strict
-expect_failure "bad-schema.yaml" portz -- kubeconform -strict -kubernetes-version "$K8S_VERSION" -schema-location default "$CHART/ci/fixtures/bad-schema.yaml"
+expect_failure "bad-schema.yaml" portz -- kubeconform -strict -kubernetes-version "$K8S_VERSION" -schema-location "$CORE_SCHEMAS" "$CHART/ci/fixtures/bad-schema.yaml"
 # an appVersion that drifts from package.json is rejected
 cp -R "$CHART" "$OUT/drift" && sed -i.bak "s/^appVersion: .*/appVersion: '9.9.9'/" "$OUT/drift/Chart.yaml"
 expect_failure "appVersion drift" "!= package.json" -- check_app_version "$OUT/drift"

@@ -25,10 +25,9 @@ worker:
   mediaMaxInputBytes: 1073741824
   scratch:
     sizeLimit: 4Gi
-    medium: Memory
 secrets:
   migrate:
-    existingSecret: ci-our-stream-pg-app
+    existingSecret: our-stream-pg-app
     key: uri
 ingress:
   className: nginx

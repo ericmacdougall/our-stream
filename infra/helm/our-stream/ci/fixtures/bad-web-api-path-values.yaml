@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Failing control for ci/check.sh: a web path under /api must be refused by the ingress template.
+ingress:
+  hosts:
+    - host: stream.example.test
+      paths:
+        - path: /api
+          pathType: Prefix

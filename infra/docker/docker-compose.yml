@@ -17,7 +17,9 @@ x-edge-ip-range: &edge-ip-range ${EDGE_IP_RANGE:-10.228.0.0/25}
 x-edge-address: &edge-address ${EDGE_ADDRESS:-10.228.0.254}
 
 x-app-env: &app-env
-  NODE_ENV: development
+  # `development` accepts the dev-only secrets below; `production` refuses them and requires an https
+  # APP_BASE_URL (apps/api/src/config.ts). This file is an evaluation stack either way (docs/deployment.md).
+  NODE_ENV: ${NODE_ENV:-development}
   DATABASE_URL: postgres://ourstream_app:${APP_DB_PASSWORD:-ourstream-app-dev-only}@postgres:5432/ourstream
   DATABASE_PLATFORM_URL: postgres://ourstream_platform:${PLATFORM_DB_PASSWORD:-ourstream-platform-dev-only}@postgres:5432/ourstream
   S3_ENDPOINT: http://storage:8333
@@ -30,7 +32,7 @@ x-app-env: &app-env
   # host-reachable address (the storage service's loopback port) instead of the internal S3_ENDPOINT.
   S3_PUBLIC_ENDPOINT: http://localhost:${S3_PORT:-8333}
   SMTP_URL: smtp://mailcatcher:1025
-  APP_BASE_URL: http://localhost:${WEB_PORT:-3000}
+  APP_BASE_URL: ${APP_BASE_URL:-http://localhost:${WEB_PORT:-3000}}
   API_BASE_URL: http://localhost:${API_PORT:-4000}
   SESSION_SECRET: ${SESSION_SECRET:-dev-only-session-secret-change-me-0123456789}
   MEDIA_HMAC_SECRET: ${MEDIA_HMAC_SECRET:-dev-only-media-secret-change-me-0123456789}
@@ -217,6 +219,8 @@ services:
     environment:
       NODE_ENV: production
       PORT: '3000'
+      # Build-time rewrite target (web.Dockerfile ARG); unused at runtime because the edge routes /api and
+      # /media to the api before they reach web.
       API_INTERNAL_URL: http://api:4000
       NEXT_PUBLIC_API_URL: http://localhost:${API_PORT:-4000}
     # No host port on purpose: web is only reachable through the edge. Its /api and /media rewrites still
@@ -232,8 +236,6 @@ services:
     # The one origin browsers use. Caddy sets X-Forwarded-For to the peer it accepted the connection
     # from and ignores whatever the client sent (its trusted_proxies list is empty): infra/docker/caddy.
     image: caddy:2.11.7
-    environment:
-      EDGE_SITE_ADDRESS: ${EDGE_SITE_ADDRESS:-:3000}
     ports:
       - '${BIND_ADDR:-127.0.0.1}:${WEB_PORT:-3000}:3000'
     networks:
@@ -243,8 +245,9 @@ services:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
       - caddy-config:/config
-    # The image runs as root so it can bind 80/443 when EDGE_SITE_ADDRESS names a public site; it keeps
-    # only that capability.
+    # The image runs as root (its /data and /config volumes are root-owned). The caddy binary carries the
+    # file capability cap_net_bind_service, so with no-new-privileges that capability must stay in the
+    # bounding set or exec fails with "operation not permitted"; everything else is dropped.
     cap_drop: [ALL]
     cap_add: [NET_BIND_SERVICE]
     security_opt: ['no-new-privileges:true']

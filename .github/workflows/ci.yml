@@ -61,11 +61,11 @@ jobs:
       - run: pnpm test
       - run: pnpm db:migrate
       - run: pnpm test:integration
-      - name: license and header gate
-        run: pnpm licenses:check && pnpm headers:check
+      - name: license, header and Dockerfile gates
+        run: pnpm licenses:check && pnpm headers:check && pnpm dockerfiles:check
 
   helm:
-    name: helm chart (lint, template, kubeconform, invariants)
+    name: infra (helm lint, template, kubeconform, invariants; compose invariants)
     runs-on: ubuntu-latest
     env:
       HELM_VERSION: v4.3.1
@@ -85,6 +85,10 @@ jobs:
           echo "${KUBECONFORM_SHA256}  kubeconform-linux-amd64.tar.gz" | sha256sum -c -
           tar xzf kubeconform-linux-amd64.tar.gz && mv kubeconform "$HOME/.local/bin/kubeconform"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          python3 -c 'import yaml' || python3 -m pip install --user pyyaml
+          python3 -c 'import yaml' || sudo apt-get install -y --no-install-recommends python3-yaml
       - name: chart checks (infra/helm/our-stream/ci/check.sh)
         run: bash infra/helm/our-stream/ci/check.sh
+      - name: compose trust-chain invariants (infra/docker/check-compose.py)
+        run: |
+          docker compose -f infra/docker/docker-compose.yml config > /tmp/compose-rendered.yaml
+          python3 infra/docker/check-compose.py /tmp/compose-rendered.yaml

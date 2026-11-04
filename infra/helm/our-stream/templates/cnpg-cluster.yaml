@@ -3,7 +3,7 @@
 {{- $pg := .Values.postgresql.cloudnativepg }}
 # In-cluster Postgres via the CloudNativePG operator (ADR-0011). Mirrors infra/docker/postgres/init/01-roles.sh:
 # the owner role (ourstream_admin) runs migrations; ourstream_app and ourstream_platform have LOGIN, no
-# BYPASSRLS and own nothing. Passwords come from the referenced basic-auth Secrets, never from values.
+# BYPASSRLS and own nothing. Role passwords come from the referenced basic-auth Secrets, never from values.
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
@@ -27,8 +27,8 @@ spec:
     initdb:
       database: ourstream
       owner: ourstream_admin
-      secret:
-        name: {{ $pg.ownerSecret }}
+      # No `secret`: the operator generates the owner credentials in `<cluster>-app` (key `uri`), which the
+      # migrate Job reads through secrets.migrate.
       postInitApplicationSQL:
         - CREATE EXTENSION IF NOT EXISTS vector
         - CREATE EXTENSION IF NOT EXISTS pgcrypto

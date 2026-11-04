@@ -61,8 +61,8 @@ chain"), so refuse them here as well as in values.schema.json.
 {{- define "our-stream.trustProxy" -}}
 {{- $cidrs := .Values.api.trustedProxyCidrs -}}
 {{- range $cidrs -}}
-{{- if not (regexMatch "^([0-9]{1,3}\\.){3}[0-9]{1,3}/([89]|[12][0-9]|3[0-2])$|^[0-9A-Fa-f:]+/(1[6-9]|[2-9][0-9]|1[01][0-9]|12[0-8])$" .) -}}
-{{- fail (printf "api.trustedProxyCidrs entries must be CIDRs no broader than /8 or /16 (got %q); TRUST_PROXY=true is never allowed" .) -}}
+{{- if or (not (regexMatch "^([0-9]{1,3}\\.){3}[0-9]{1,3}/([89]|[12][0-9]|3[0-2])$|^[0-9A-Fa-f:]+/(1[6-9]|[2-9][0-9]|1[01][0-9]|12[0-8])$" .)) (regexMatch "(?i)^::ffff:" .) -}}
+{{- fail (printf "api.trustedProxyCidrs entries must be CIDRs no broader than /8 or /16 and not IPv4-mapped IPv6 (got %q); TRUST_PROXY=true is never allowed" .) -}}
 {{- end -}}
 {{- end -}}
 {{- if $cidrs -}}{{ join "," $cidrs }}{{- else -}}false{{- end -}}

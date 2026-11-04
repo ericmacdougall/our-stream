@@ -4,9 +4,11 @@
 
 Every pod runs as non-root with privilege escalation disabled and all capabilities dropped; nothing is
 privileged or uses host namespaces; the admin database URL is visible to the migrate Job and nothing else;
-TRUST_PROXY is `false` or a CIDR list, never `true`; no development default secret appears anywhere; and the
-rendering contains the expected number of resources per kind, so an optional template that silently renders
-nothing cannot pass.
+TRUST_PROXY is `false` or a CIDR list (never `true`, never IPv4-mapped IPv6); no development default secret
+appears anywhere; routing never sends /api or /media to web and always sends /api to the api; the api and
+web allow-policies name a non-empty ingress namespace and never admit web into the api; and the rendering
+contains the expected number of resources per kind, so an optional template that silently renders nothing
+cannot pass.
 
 usage: assert-rendered.py --expect Kind=N [--expect Kind=N ...] rendered.yaml
 """
@@ -23,6 +25,7 @@ POD_KINDS = {"Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob"}
 CIDR = re.compile(
     r"^([0-9]{1,3}\.){3}[0-9]{1,3}/([89]|[12][0-9]|3[0-2])$|^[0-9A-Fa-f:]+/(1[6-9]|[2-9][0-9]|1[01][0-9]|12[0-8])$"
 )
+V4_MAPPED = re.compile(r"^::ffff:", re.I)
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[4]
 
 
@@ -51,21 +54,18 @@ def pod_spec(doc):
     return spec["template"]["spec"]
 
 
-def check(path, expectations, markers):
-    problems = []
-    text = pathlib.Path(path).read_text(encoding="utf-8")
-    docs = [d for d in yaml.safe_load_all(text) if d]
-    if not docs:
-        return [f"{path}: no documents rendered"]
-    for marker in sorted(markers):
-        if marker in text:
-            problems.append(f"{path}: development secret {marker!r} present in the rendering")
+def component(doc):
+    return (doc.get("metadata", {}).get("labels") or {}).get("app.kubernetes.io/component")
 
-    counts = collections.Counter(d.get("kind") for d in docs)
-    for kind, expected in expectations.items():
-        if counts.get(kind, 0) != expected:
-            problems.append(f"{path}: expected {expected} x {kind}, found {counts.get(kind, 0)}")
 
+def trust_proxy_ok(value):
+    if value == "false":
+        return True
+    parts = value.split(",")
+    return all(CIDR.match(p) and not V4_MAPPED.match(p) for p in parts)
+
+
+def check_workloads(docs, problems):
     admin_holders = []
     saw_api = False
     for doc in docs:
@@ -100,25 +100,93 @@ def check(path, expectations, markers):
             env = c.get("env") or []
             if any(e["name"] == "DATABASE_ADMIN_URL" for e in env):
                 admin_holders.append(cname)
-            if doc.get("metadata", {}).get("labels", {}).get("app.kubernetes.io/component") == "api":
+            if component(doc) == "api":
                 saw_api = True
                 tp = [e for e in env if e["name"] == "TRUST_PROXY"]
                 if len(tp) != 1:
                     problems.append(f"{cname}: expected exactly one TRUST_PROXY, found {len(tp)}")
-                else:
-                    value = str(tp[0].get("value", ""))
-                    if value != "false" and not all(CIDR.match(p) for p in value.split(",")):
-                        problems.append(f"{cname}: TRUST_PROXY={value!r} is neither false nor a CIDR list")
+                elif not trust_proxy_ok(str(tp[0].get("value", ""))):
+                    problems.append(f"{cname}: TRUST_PROXY={tp[0].get('value')!r} is neither false nor a safe CIDR list")
                 for e in env:
                     if e["name"] in ("DATABASE_PLATFORM_URL", "DATABASE_ADMIN_URL"):
                         problems.append(f"{cname}: api must not receive {e['name']}")
     if not saw_api:
-        problems.append(f"{path}: no api Deployment rendered")
+        problems.append("no api Deployment rendered")
     outside_job = [h for h in admin_holders if not h.startswith("Job/")]
     if outside_job:
         problems.append(f"DATABASE_ADMIN_URL outside the migrate Job: {outside_job}")
     if not any(h.startswith("Job/") for h in admin_holders):
         problems.append("no Job carries DATABASE_ADMIN_URL (migrations would never run)")
+
+
+def check_routing(docs, problems):
+    """/api and /media must reach the api Service, never the web Service, and a /api route must exist."""
+    web_services = {d["metadata"]["name"] for d in docs if d.get("kind") == "Service" and component(d) == "web"}
+    api_services = {d["metadata"]["name"] for d in docs if d.get("kind") == "Service" and component(d) == "api"}
+    api_route = False
+    for doc in docs:
+        kind = doc.get("kind")
+        name = doc.get("metadata", {}).get("name", "?")
+        if kind == "Ingress":
+            for rule in doc["spec"].get("rules") or []:
+                for p in (rule.get("http") or {}).get("paths") or []:
+                    backend = p["backend"]["service"]["name"]
+                    path = p.get("path", "/")
+                    if path.startswith("/api") or path.startswith("/media"):
+                        if backend in web_services:
+                            problems.append(f"Ingress/{name}: {path} routed to web Service {backend}")
+                        if path.startswith("/api") and backend in api_services:
+                            api_route = True
+        elif kind == "HTTPRoute":
+            for rule in doc["spec"].get("rules") or []:
+                paths = [m.get("path", {}).get("value", "/") for m in rule.get("matches") or []]
+                backends = [b["name"] for b in rule.get("backendRefs") or []]
+                for path in paths:
+                    if path.startswith("/api") or path.startswith("/media"):
+                        if any(b in web_services for b in backends):
+                            problems.append(f"HTTPRoute/{name}: {path} routed to web Service")
+                        if path.startswith("/api") and any(b in api_services for b in backends):
+                            api_route = True
+    if any(d.get("kind") in ("Ingress", "HTTPRoute") for d in docs) and not api_route:
+        problems.append("no Ingress/HTTPRoute sends /api to the api Service (requests would fall through to web)")
+
+
+def check_network_policies(docs, problems):
+    """Allow-policies for web and api must name an ingress namespace and the api policy must not admit web."""
+    for doc in docs:
+        if doc.get("kind") != "NetworkPolicy":
+            continue
+        name = doc["metadata"]["name"]
+        target = (doc["spec"].get("podSelector") or {}).get("matchLabels") or {}
+        comp = target.get("app.kubernetes.io/component")
+        if comp not in ("web", "api"):
+            continue
+        for rule in doc["spec"].get("ingress") or []:
+            for peer in rule.get("from") or []:
+                ns = peer.get("namespaceSelector")
+                if ns is not None and not (ns.get("matchLabels") or ns.get("matchExpressions")):
+                    problems.append(f"NetworkPolicy/{name}: empty namespaceSelector admits every namespace")
+                ps = (peer.get("podSelector") or {}).get("matchLabels") or {}
+                if comp == "api" and ps.get("app.kubernetes.io/component") == "web":
+                    problems.append(f"NetworkPolicy/{name}: web pods must not be allowed to reach the api")
+
+
+def check(path, expectations, markers):
+    problems = []
+    text = pathlib.Path(path).read_text(encoding="utf-8")
+    docs = [d for d in yaml.safe_load_all(text) if d]
+    if not docs:
+        return [f"{path}: no documents rendered"]
+    for marker in sorted(markers):
+        if marker in text:
+            problems.append(f"{path}: development secret {marker!r} present in the rendering")
+    counts = collections.Counter(d.get("kind") for d in docs)
+    for kind, expected in expectations.items():
+        if counts.get(kind, 0) != expected:
+            problems.append(f"{path}: expected {expected} x {kind}, found {counts.get(kind, 0)}")
+    check_workloads(docs, problems)
+    check_routing(docs, problems)
+    check_network_policies(docs, problems)
     return problems
 
 
