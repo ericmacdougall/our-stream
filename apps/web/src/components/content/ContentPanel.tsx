@@ -14,6 +14,8 @@ import { detailMedia, withM1bDefaults } from '@/lib/m1b/api';
 import { Notice } from '../Notice';
 import { UploadFlow } from '../upload/UploadFlow';
 import { ContentPlayer } from './ContentPlayer';
+import { StatsPanel } from './StatsPanel';
+import { TagsPinsEditor } from './TagsPinsEditor';
 import { ProcessingStatus } from './ProcessingStatus';
 import { useContentPolling } from './useContentPolling';
 
@@ -193,6 +195,12 @@ export function ContentPanel({ initial, tMs = null }: { initial: Detail; tMs?: n
           ) : null}
         </dl>
       </section>
+      {detail.canEdit && detail.state !== 'retracted' ? (
+        <>
+          <TagsPinsEditor detail={detail} onDetail={(next) => setDetail(next)} />
+          <StatsPanel contentId={detail.id} />
+        </>
+      ) : null}
       <dialog
         ref={dialogRef}
         className="dialog"

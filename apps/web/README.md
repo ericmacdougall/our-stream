@@ -57,7 +57,7 @@ installed Chrome when the bundled Chromium lacks H.264. Reports land in `playwri
 
 `/` feed (default landing), `/sign-in`, `/sign-up`, `/magic?token=`, `/streams`, `/streams/[id]`,
 `/upload`, `/content/[id]` (`?t=<ms>` seeks the player), `/content/[id]/publish`, `/notifications`,
-`/account`, `/search?q=&streamId=&tag=&play=&t=`.
+`/account`, `/search?q=&streamId=&tag=&play=&t=`; the feed takes `?streamId=&tag=&pinned=true` filters.
 
 `/sign-in` and `/sign-up` check the session server-side (`getMe`) and redirect a signed-in visitor to
 `/` or the same-origin `?next` target (`src/lib/auth-redirect.ts`; auth pages and non-page paths such
@@ -109,6 +109,9 @@ mutations carry `x-csrf-token`; auth routes are the only unauthenticated ones.
 | POST        | `/v1/content/{id}/share`           | ShareRequest → ShareResponse (`linkPath` only)                 |
 | GET         | `/v1/search`                       | `?q&cursor&limit&streamId&tag` → SearchResponse                |
 | POST        | `/v1/content/{id}/engagement`      | EngagementEventRequest → `{ recorded }`                        |
+| GET         | `/v1/content/{id}/stats`           | – → ContentStats (`viewers` only under privacy mode `named`)   |
+| PUT         | `/v1/content/{id}/tags`            | SetTagsRequest → ContentDetailM1b                              |
+| POST/DELETE | `/v1/content/{id}/pin`             | PinRequest / `?streamId` → ContentDetailM1b                    |
 
 Search (`/search?q=&streamId=&tag=`) is a plain GET form, so the query lives in the URL and never in
 a client log; `?play=<id>&t=<ms>` opens a result's inline player at that instant and is a shareable
@@ -121,6 +124,13 @@ only moves the continuity point: it never fires a milestone and thresholds it sk
 unfired), `complete` on ended, and a new session key for a replay after completion; it counts only
 the active, on-screen player while the tab is visible, and sends the M1a `/view` record from the
 same hook.
+
+Tags and pins: the publish form sets up to four event tags and, for owners/admins/announcers, an
+org-wide pin after a successful publish; the content page offers the tag editor and explicit pin
+targets (org-wide by org role; a stream only when the clip is addressed to it and the viewer
+moderates it, `src/lib/m1b/pins.ts`), because the contract exposes one `pinned` aggregate per clip.
+Stats (`/v1/content/{id}/stats`, author only) show counts; the viewer table renders only when the
+server sends `viewers` (org privacy mode `named`); the client never infers names otherwise.
 
 M1b routes are called only through `src/lib/m1b/api.ts` (one file to edit on a contract change). The
 feed and detail fields they add (`tags`, `pinned`, `likeCount`, `liked`, `commentCount`) are filled

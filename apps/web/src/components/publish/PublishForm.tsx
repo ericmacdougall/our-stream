@@ -11,6 +11,10 @@ import { browserApi } from '@/lib/api/client';
 import { errorMessage } from '@/lib/errors';
 import { t } from '@/lib/i18n';
 import { isoToLocalDateTime, localDateTimeToIso } from '@/lib/schedule';
+import { useSession } from '@/components/SessionProvider';
+import { pin, setTags, withM1bDefaults, type Tag } from '@/lib/m1b/api';
+import { TAGS } from '@/lib/m1b/search';
+import { TAG_LABEL } from '@/lib/m1b/tags';
 import { Notice } from '../Notice';
 
 type Target = z.output<typeof AudienceTarget>;
@@ -40,6 +44,10 @@ export function PublishForm({
   members: z.output<typeof MemberSummary>[];
 }) {
   const router = useRouter();
+  const me = useSession();
+  const canPinOrgWide = ['owner', 'admin', 'announcer'].includes(me?.org?.role ?? '');
+  const [tags, setTagsState] = useState<Tag[]>(withM1bDefaults(content).tags);
+  const [pinOrgWide, setPinOrgWide] = useState(false);
   const existing = content.audience;
   const [everyone, setEveryone] = useState(existing.some((a) => a.type === 'everyone'));
   const [streamIds, setStreamIds] = useState<Set<string>>(
@@ -119,6 +127,25 @@ export function PublishForm({
         setError(message);
         return;
       }
+      // M1b: tags and an org-wide pin are applied after the publish succeeded (a pin needs a
+      // published clip); a failure here leaves the clip published and reports the step.
+      const initialTags = withM1bDefaults(content).tags;
+      const tagsChanged =
+        tags.length !== initialTags.length || tags.some((x) => !initialTags.includes(x));
+      if (tagsChanged) {
+        const tagged = await setTags(content.id, tags);
+        if (!tagged.ok) {
+          setError(tagged.message);
+          return;
+        }
+      }
+      if (pinOrgWide && canPinOrgWide) {
+        const pinned = await pin(content.id, null);
+        if (!pinned.ok) {
+          setError(pinned.message);
+          return;
+        }
+      }
       router.push(publishAt ? `/content/${content.id}` : '/');
       router.refresh();
     } catch {
@@ -186,6 +213,39 @@ export function PublishForm({
             {t('publish.groupsHint')}
           </small>
         </div>
+      </fieldset>
+      <fieldset className="field" disabled={pending}>
+        <legend>{t('publish.tags')}</legend>
+        <p className="muted">{t('tags.hint')}</p>
+        {TAGS.map((tag) => (
+          <label key={tag} className="inline">
+            <input
+              type="checkbox"
+              name="tags"
+              value={tag}
+              checked={tags.includes(tag)}
+              onChange={(e) =>
+                setTagsState((prev) =>
+                  e.target.checked
+                    ? [...prev.filter((x) => x !== tag), tag]
+                    : prev.filter((x) => x !== tag),
+                )
+              }
+            />{' '}
+            {t(TAG_LABEL[tag])}
+          </label>
+        ))}
+        {canPinOrgWide ? (
+          <label className="inline">
+            <input
+              type="checkbox"
+              name="pinOrgWide"
+              checked={pinOrgWide}
+              onChange={(e) => setPinOrgWide(e.target.checked)}
+            />{' '}
+            {t('publish.pinOrgWide')}
+          </label>
+        ) : null}
       </fieldset>
       <fieldset className="field" disabled={pending}>
         <legend>{t('publish.when')}</legend>

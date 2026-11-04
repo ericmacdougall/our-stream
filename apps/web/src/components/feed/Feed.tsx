@@ -38,7 +38,16 @@ type Item = z.output<typeof FeedItemM1b>;
 const PAGE_SIZE = 10;
 const SYNC_INTERVAL_MS = 30_000;
 
-export function Feed({ streamId }: { streamId?: string }) {
+export function Feed({
+  streamId,
+  tag,
+  pinned = false,
+}: {
+  streamId?: string;
+  /** M1b filters: pass-through only; the server applies them inside readerVisible. */
+  tag?: string;
+  pinned?: boolean;
+}) {
   const reducedMotion = useReducedMotion();
   const [settings, dispatch] = useReducer(feedSettingsReducer, DEFAULT_FEED_SETTINGS);
   const [hydrated, setHydrated] = useState(false);
@@ -82,9 +91,17 @@ export function Feed({ streamId }: { streamId?: string }) {
       setError(null);
       const gen = reset ? ++generation.current : generation.current;
       try {
-        const query: { limit: number; cursor?: string; streamId?: string } = { limit: PAGE_SIZE };
+        const query: {
+          limit: number;
+          cursor?: string;
+          streamId?: string;
+          tag?: string;
+          pinned?: 'true' | 'false';
+        } = { limit: PAGE_SIZE };
         if (cursor) query.cursor = cursor;
         if (streamId) query.streamId = streamId;
+        if (tag) query.tag = tag;
+        if (pinned) query.pinned = 'true';
         const result = await browserApi().GET('/v1/feed', { params: { query } });
         if (gen !== generation.current) return;
         const message = errorMessage(result);
@@ -104,7 +121,7 @@ export function Feed({ streamId }: { streamId?: string }) {
         }
       }
     },
-    [streamId],
+    [streamId, tag, pinned],
   );
 
   const refetchAll = useCallback(async () => {

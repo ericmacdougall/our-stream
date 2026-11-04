@@ -12,7 +12,7 @@ import { search, withM1bDefaults, type Search as SearchPage, type Tag } from '@/
 import { formatTotal, searchHref, snippetSegments, TAGS, type SearchState } from '@/lib/m1b/search';
 import { useDocumentVisible, usePlaybackEngagement } from '@/lib/m1b/usePlaybackEngagement';
 import { useReducedMotion } from '@/lib/useReducedMotion';
-import { TAG_LABEL } from '../feed/ReactionBar';
+import { TAG_LABEL } from '@/lib/m1b/tags';
 import { Player, type PlayerHandle } from '../feed/Player';
 import { Notice } from '../Notice';
 

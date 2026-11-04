@@ -3,16 +3,10 @@
 // Like (toggle button with a constant name and aria-pressed), comments, share, pinned badge and
 // event tags for one clip. Counts are plain text, not live regions: they change often and a
 // screen reader user already hears the pressed state change.
-import { t, type MessageId } from '@/lib/i18n';
-import type { M1bItemFields, Tag } from '@/lib/m1b/api';
+import { t } from '@/lib/i18n';
+import type { M1bItemFields } from '@/lib/m1b/api';
+import { TAG_LABEL } from '@/lib/m1b/tags';
 import { useLike } from '@/lib/m1b/useLike';
-
-export const TAG_LABEL: Record<Tag, MessageId> = {
-  onboarding: 'tag.onboarding',
-  announcement: 'tag.announcement',
-  'current-events': 'tag.current-events',
-  training: 'tag.training',
-};
 
 export function ReactionBar({
   contentId,

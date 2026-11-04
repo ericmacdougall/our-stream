@@ -504,6 +504,51 @@ button.danger {
   min-height: 24px;
 }
 
+/* Stats, filters (M1b) */
+.stats-grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem var(--space-2);
+}
+.stats-grid dt {
+  margin: 0;
+}
+.viewers {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: var(--space-2);
+  font-size: 0.95rem;
+}
+.viewers caption {
+  text-align: left;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+.viewers th,
+.viewers td {
+  text-align: left;
+  padding: 0.3rem 0.5rem;
+  border-top: 1px solid var(--color-border);
+}
+.feed-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  align-items: center;
+  padding: var(--space-1) var(--space-2);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+.feed-filters select,
+.feed-filters button,
+.feed-filters .button {
+  min-height: 2rem;
+  padding: 0.25rem 0.5rem;
+}
+.feed-filters label {
+  font-weight: 400;
+}
+
 /* Search (M1b) */
 .topnav-search {
   display: flex;
