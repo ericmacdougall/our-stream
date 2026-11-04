@@ -122,13 +122,13 @@ Because of that, only unauthenticated traffic is budgeted by address. Everything
 server validated itself (`apps/api/src/lib/limits.ts`), so neither a rotated cookie nor a spoofed
 address buys a fresh budget:
 
-| Budget (per minute)         | Key                                      | Setting                     |
-| --------------------------- | ---------------------------------------- | --------------------------- |
-| sign-in routes              | client address (`@fastify/rate-limit`)   | `AUTH_RATE_LIMIT_MAX` (20)  |
-| signup, login, magic link   | normalised email the request acts on     | `AUTH_EMAIL_RATE_LIMIT_MAX` (10) |
-| requests without a session  | client address                           | `IP_RATE_LIMIT_MAX` (600)   |
-| authenticated requests      | session id returned by the database      | `SESSION_RATE_LIMIT_MAX` (600) |
-| media served to a token     | user id inside the verified media token  | `MEDIA_RATE_LIMIT_MAX` (1200) |
+| Budget (per minute)        | Key                                     | Setting                          |
+| -------------------------- | --------------------------------------- | -------------------------------- |
+| sign-in routes             | client address (`@fastify/rate-limit`)  | `AUTH_RATE_LIMIT_MAX` (20)       |
+| signup, login, magic link  | normalised email the request acts on    | `AUTH_EMAIL_RATE_LIMIT_MAX` (10) |
+| requests without a session | client address                          | `IP_RATE_LIMIT_MAX` (600)        |
+| authenticated requests     | session id returned by the database     | `SESSION_RATE_LIMIT_MAX` (600)   |
+| media served to a token    | user id inside the verified media token | `MEDIA_RATE_LIMIT_MAX` (1200)    |
 
 Budgets are in-memory per API process; a shared store is scheduled with multi-instance deployments
 (ADR-0004). When `TRUST_PROXY` is `false` behind the web container, the per-address budgets are shared

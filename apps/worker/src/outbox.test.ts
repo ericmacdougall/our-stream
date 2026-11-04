@@ -3,7 +3,13 @@
 // arguments, which jobs are enqueued, and that a failing event never blocks the batch.
 import { describe, expect, it } from 'vitest';
 import type pg from 'pg';
-import { dispatchEvent, drainOnce, retentionFor, type DomainEvent, MAX_EVENT_ATTEMPTS } from './outbox.js';
+import {
+  dispatchEvent,
+  drainOnce,
+  retentionFor,
+  type DomainEvent,
+  MAX_EVENT_ATTEMPTS,
+} from './outbox.js';
 import { contentTransition } from './transition.js';
 import type { JobContext } from './jobs.js';
 

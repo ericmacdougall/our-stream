@@ -50,11 +50,11 @@ describe('pg-boss bootstrap', () => {
     expect(() => splitPlan('BEGIN;\nCREATE INDEX CONCURRENTLY i ON t (c);\nCOMMIT;\n')).toThrow(
       /CONCURRENTLY/,
     );
-    expect(splitPlan('BEGIN;\nSELECT 1;\nCOMMIT;\n-- note\nCREATE INDEX CONCURRENTLY a ON t (c);\n')).toEqual(
-      {
-        transactional: 'BEGIN;\nSELECT 1;\nCOMMIT;',
-        postCommit: ['CREATE INDEX CONCURRENTLY a ON t (c);'],
-      },
-    );
+    expect(
+      splitPlan('BEGIN;\nSELECT 1;\nCOMMIT;\n-- note\nCREATE INDEX CONCURRENTLY a ON t (c);\n'),
+    ).toEqual({
+      transactional: 'BEGIN;\nSELECT 1;\nCOMMIT;',
+      postCommit: ['CREATE INDEX CONCURRENTLY a ON t (c);'],
+    });
   });
 });

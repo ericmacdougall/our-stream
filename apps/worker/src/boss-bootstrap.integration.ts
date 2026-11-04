@@ -27,7 +27,10 @@ describe.skipIf(!(adminUrl && platformUrl))('pg-boss bootstrap (integration)', (
   const previous = target - 1;
 
   const version = async () =>
-    Number((await admin.query<{ version: number }>(`SELECT version FROM ${schema}.version`)).rows[0]!.version);
+    Number(
+      (await admin.query<{ version: number }>(`SELECT version FROM ${schema}.version`)).rows[0]!
+        .version,
+    );
   const indexNames = () =>
     splitPlan(getMigrationPlans(schema, previous)).postCommit.map(
       (s) => /IF NOT EXISTS (\w+)/.exec(s)![1]!,

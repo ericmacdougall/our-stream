@@ -284,7 +284,10 @@ describe.skipIf(!integrationReady)('content, publish rules and feed (integration
   });
 
   it('upload: a part count that does not fit the file size is refused before any version row or multipart upload exists (N5)', async () => {
-    const c = await h.call('POST', '/v1/content', contributor, { kind: 'clip', title: 'Parts cap' });
+    const c = await h.call('POST', '/v1/content', contributor, {
+      kind: 'clip',
+      title: 'Parts cap',
+    });
     const contentId = (c.body as { id: string }).id;
     const init = await h.call('POST', `/v1/content/${contentId}/upload/init`, contributor, {
       fileName: 'small.mp4',

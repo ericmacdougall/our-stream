@@ -300,7 +300,9 @@ describe.skipIf(!integrationReady)('auth (integration)', () => {
       password: 'invitee-chosen-password-1',
     });
     expect(ok.status).toBe(200);
-    const anon = await h.call('POST', '/v1/auth/password', null, { password: 'nobody-here-123456' });
+    const anon = await h.call('POST', '/v1/auth/password', null, {
+      password: 'nobody-here-123456',
+    });
     expect(anon.status).toBe(401);
   });
 

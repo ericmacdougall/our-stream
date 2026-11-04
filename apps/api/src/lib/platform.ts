@@ -199,16 +199,20 @@ export async function magicLinkConsume(
 
 /** Memberships of the account that presented this live session token (migration 0005): the API can
  * never list another account's organisations. */
-export async function membershipsOfSession(q: Queryable, tokenHash: Buffer): Promise<MembershipRow[]> {
+export async function membershipsOfSession(
+  q: Queryable,
+  tokenHash: Buffer,
+): Promise<MembershipRow[]> {
   const r = await q.query<{
     org_id: string;
     slug: string;
     name: string;
     role: OrgRole;
     status: MembershipStatus;
-  }>('SELECT org_id, slug, name, role, status FROM platform_memberships_of_session($1) ORDER BY name', [
-    tokenHash,
-  ]);
+  }>(
+    'SELECT org_id, slug, name, role, status FROM platform_memberships_of_session($1) ORDER BY name',
+    [tokenHash],
+  );
   return r.rows.map((m) => ({
     orgId: m.org_id,
     slug: m.slug,
