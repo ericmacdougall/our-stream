@@ -3,7 +3,8 @@
 // routing, attest/claim/parse/finish, fencing, kill after claim, attestation exhaustion, embedding with
 // zero-call reruns, reconciliation and garbage collection, clip backfill with the flag, the shadow pin flow,
 // canary redaction and the SQL/TypeScript hash cross-check.
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import { promisify } from 'node:util';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -23,6 +24,8 @@ const adminUrl = process.env['DATABASE_ADMIN_URL'];
 const appUrl = process.env['DATABASE_URL'];
 const platformUrl = process.env['DATABASE_PLATFORM_URL'];
 const enabled = Boolean(adminUrl && appUrl && platformUrl);
+
+const execFileP = promisify(execFile);
 
 describe.skipIf(!enabled)('worker documents (integration)', () => {
   let scratch: Scratch;
@@ -540,5 +543,55 @@ describe.skipIf(!enabled)('worker documents (integration)', () => {
     );
     expect(states.map((s) => s.state).sort()).toEqual(['active', 'shadow']);
     runtimeProviders = [provider()];
+  });
+
+  it('pin-cli: ensure is the idempotent post-migrate index job, register adds a shadow pin, status lists readiness', async () => {
+    const cli = new URL('./pin-cli.ts', import.meta.url).pathname;
+    const env = {
+      ...process.env,
+      DATABASE_ADMIN_URL: scratch.adminUrl,
+      DATABASE_PLATFORM_URL: scratch.platformUrl,
+    };
+    const runCli = async (...args: string[]) =>
+      (await execFileP(process.execPath, ['--import', 'tsx', cli, ...args], { env })).stdout;
+    const first = JSON.parse(await runCli('ensure')) as {
+      pins: {
+        pinId: string;
+        state: string;
+        action: string;
+        valid: boolean;
+        coverageComplete: boolean;
+      }[];
+    };
+    expect(first.pins.length).toBeGreaterThanOrEqual(1);
+    expect(first.pins.every((p) => p.valid)).toBe(true);
+    expect(first.pins.find((p) => p.state === 'active')?.action).toBe('kept'); // created by migration 0013
+    const model = `cli-model-${Date.now()}`;
+    const id = (await runCli('register', model)).trim();
+    expect(id).toMatch(/^[0-9a-f-]{36}$/);
+    const second = JSON.parse(await runCli('ensure')) as typeof first;
+    expect(second.pins.find((p) => p.pinId === id)).toMatchObject({
+      state: 'shadow',
+      action: 'created',
+      valid: true,
+    });
+    const third = JSON.parse(await runCli('ensure')) as typeof first;
+    expect(third.pins.find((p) => p.pinId === id)).toMatchObject({ action: 'kept', valid: true });
+    const status = JSON.parse(await runCli('status')) as {
+      id: string;
+      model: string;
+      state: string;
+      index_valid: boolean | null;
+    }[];
+    expect(status.find((p) => p.id === id)).toMatchObject({
+      model,
+      state: 'shadow',
+      index_valid: true,
+    });
+    // a failing control: without the admin URL the job refuses instead of doing nothing silently
+    const noAdmin = await execFileP(process.execPath, ['--import', 'tsx', cli, 'ensure'], {
+      env: { ...env, DATABASE_ADMIN_URL: '' },
+    }).catch((e: { code?: number }) => e);
+    expect((noAdmin as { code?: number }).code).toBe(2);
   });
 });

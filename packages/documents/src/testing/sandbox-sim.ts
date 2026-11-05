@@ -34,6 +34,12 @@ export interface SandboxSimOptions {
   pollMs?: number | undefined;
 }
 
+/** Whole file, then rename into place: the client must never see a half-written result by accident. */
+async function atomicWrite(path: string, data: string | Buffer): Promise<void> {
+  await writeFile(`${path}.tmp`, data);
+  await rename(`${path}.tmp`, path);
+}
+
 export class SandboxSim {
   readonly nonce = randomBytes(16).toString('hex');
   readonly jobs: { job: JobFile; slotFiles: string[] }[] = [];
@@ -122,7 +128,7 @@ export class SandboxSim {
           );
           break;
         case 'refuse':
-          await writeFile(out, JSON.stringify({ v: 1, jobId, ok: false, code: b.code }));
+          await atomicWrite(out, JSON.stringify({ v: 1, jobId, ok: false, code: b.code }));
           break;
         case 'symlink':
           await symlink(b.target, out);
@@ -134,7 +140,7 @@ export class SandboxSim {
           await mkdir(out);
           break;
         case 'garbage':
-          await writeFile(out, b.body);
+          await atomicWrite(out, b.body);
           break;
         case 'wrong-job':
           await writeFile(
@@ -143,7 +149,7 @@ export class SandboxSim {
           );
           break;
         case 'oversize':
-          await writeFile(out, Buffer.alloc(33 * 1024 * 1024, 0x20));
+          await atomicWrite(out, Buffer.alloc(33 * 1024 * 1024, 0x20));
           break;
         case 'hang':
           break;

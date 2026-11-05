@@ -68,15 +68,25 @@ export async function writeZeroBomb(
   await pipeline(Readable.from([lh, name, body, ch, name, end]), out);
 }
 
-/** A worksheet XML with `cells` numeric cells, written as one string of rows of 100 cells. */
+/** Spreadsheet column letters: 0 -> A, 25 -> Z, 26 -> AA. */
+export function colLetters(i: number): string {
+  let n = i;
+  let s = '';
+  do {
+    s = String.fromCharCode(65 + (n % 26)) + s;
+    n = Math.floor(n / 26) - 1;
+  } while (n >= 0);
+  return s;
+}
+
+/** A worksheet XML with `cells` numeric cells at distinct addresses, 100 per row. */
 export function bigSheetXml(cells: number): string {
   const rows: string[] = [];
   for (let r = 0, left = cells; left > 0; r += 1) {
     const n = Math.min(100, left);
     left -= n;
     const cs: string[] = [];
-    for (let c = 0; c < n; c += 1)
-      cs.push(`<c r="${String.fromCharCode(65 + (c % 26))}${r + 1}"><v>1</v></c>`);
+    for (let c = 0; c < n; c += 1) cs.push(`<c r="${colLetters(c)}${r + 1}"><v>1</v></c>`);
     rows.push(`<row r="${r + 1}">${cs.join('')}</row>`);
   }
   return `<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${rows.join('')}</sheetData></worksheet>`;

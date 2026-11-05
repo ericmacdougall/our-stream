@@ -40,9 +40,10 @@ const client = (over: Record<string, number> = {}) =>
   new ParserClient({
     ...dirs(),
     pollMs: 10,
-    challengeTimeoutMs: 400,
-    resultGraceMs: 300,
-    claimWaitMs: 500,
+    // Generous on purpose: dev2 runs at a load of 100+ and a starved timer must not read as a missing answer.
+    challengeTimeoutMs: 4000,
+    resultGraceMs: 5000,
+    claimWaitMs: 8000,
     ...over,
   });
 const reasonOf = async (p: Promise<unknown>): Promise<UnavailableReason | 'ok'> => {
