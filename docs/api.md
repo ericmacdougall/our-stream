@@ -1,4 +1,4 @@
-# API: sessions, CSRF, uploads, publishing, feed, media (M1a); reactions, comments, search, engagement, pins (M1b)
+# API: sessions, CSRF, uploads, publishing, feed, media (M1a); reactions, comments, search, engagement, pins (M1b); documents (M2a)
 
 The API in `apps/api` is the single authorization surface (ADR-0011). Every route is declared with the
 Zod schemas in `packages/contracts/src/m1a.ts` and `m1b.ts`, so `pnpm contracts:generate` regenerates the typed
@@ -167,7 +167,9 @@ endpoint used only to presign upload-part URLs; defaults to `S3_ENDPOINT`), `S3_
 `SESSION_TTL_DAYS`, `MAGIC_LINK_TTL_MINUTES`, `INVITE_LINK_TTL_DAYS`, `MEDIA_TOKEN_TTL_SECONDS`,
 `UPLOAD_URL_TTL_SECONDS`, `AUTH_RATE_LIMIT_MAX`, `AUTH_EMAIL_RATE_LIMIT_MAX`, `IP_RATE_LIMIT_MAX`,
 `SESSION_RATE_LIMIT_MAX`, `MEDIA_RATE_LIMIT_MAX`, `WRITE_RATE_LIMIT_MAX`, `COMMENT_RATE_LIMIT_MAX`,
-`SEARCH_RATE_LIMIT_MAX`, `SHARE_RATE_LIMIT_MAX`. In production the process refuses to start with the
+`SEARCH_RATE_LIMIT_MAX`, `SHARE_RATE_LIMIT_MAX`; M2a adds `DOCUMENTS_ENABLED_DEFAULT`, `DOCUMENT_MAX_BYTES`,
+`DOCUMENT_UPLOADS_PER_USER_HOUR`, `DOCUMENT_ORG_QUOTA_BYTES`, `DOCUMENT_QUERY_RATE_LIMIT_MAX`,
+`DOCUMENT_DOWNLOAD_CONCURRENCY` and `DOCUMENT_DOWNLOAD_CONCURRENCY_PER_USER` (below). In production the process refuses to start with the
 compose development defaults for `SESSION_SECRET`, `MEDIA_HMAC_SECRET` or `S3_SECRET_KEY`, with equal
 session and media secrets, or with a non-https `APP_BASE_URL`.
 
@@ -242,3 +244,95 @@ linkPath}` is identical for unknown, deactivated and no-access recipients, every
   `commentsEnabled`. `GET /v1/streams` items and `PATCH /v1/streams/:id` carry `commentsEnabled`.
 - `GET /v1/me` carries `hasPassword`; `POST /v1/auth/password` answers 409 `password_set` before
   hashing when a password exists.
+
+## M2a: documents
+
+Documents (PDF, DOCX, PPTX, XLSX, CSV, Markdown) are `content` rows with `kind: 'document'`. The same
+lifecycle as a clip applies (draft, publish, schedule, expire, retract, replace); what differs is below. The
+schemas live in `packages/contracts/src/m2a.ts` and the OpenAPI document. The database side (the gate, the
+flag, the kill switch, the version lifecycle functions) is in `docs/documents.md`.
+
+**Visibility.** Every reader path embeds `readerVisibleSql`, whose document gate requires the org flag
+`documents_enabled`, the deployment kill switch to be off, and the content's current version to be `current`.
+A published document whose version is still processing or has failed is invisible to everyone except its
+authors (they use `GET /v1/content/:id`, which shows `currentVersion.status` and the original file name).
+Documents never appear in `/v1/feed`, `/v1/search`, `/v1/content/:id/view` or `/v1/content/:id/media-token`.
+
+**Org flag.** `OrgSettings.documentsEnabled` (`GET`/`PATCH /v1/org/settings`, owner or admin only) is stored as
+the top-level `documents_enabled` key of `org.settings`; an absent key reads as `false`. Org signup writes the
+deployment default (`DOCUMENTS_ENABLED_DEFAULT`; the compose file sets `true`, every other install
+defaults to `false`) in the same transaction that creates the org, so there is no window without the key.
+Turning the flag on while the deployment kill switch is engaged is 403 `feature_disabled` (turning it off is
+always allowed). Orgs that already existed before migration 0013 have no key and stay off until an admin sets
+it or the platform function `platform_documents_flag_init_missing(default)` is run by an operator or the
+worker (the API role cannot call it). With the flag off: creating a document, upload init and complete and a
+draft-to-published `publish` answer 403 `feature_disabled`; the viewer, the download, the list and search
+return nothing (the neutral 404 for ids); re-publishing an already published document, retraction and expiry
+keep working, and clips are untouched.
+
+**Upload.** `POST /v1/content` accepts `kind: 'document'`. `POST /v1/content/:id/upload/init` and
+`/replace` take the same body as for clips and add, for documents:
+
+| rule                | detail                                                                                                                                                                                                                                                                                                                                         |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| extension and MIME  | `.pdf` `application/pdf`; `.docx`, `.pptx`, `.xlsx` the OOXML types; `.csv` `text/csv`, `application/csv`, `application/vnd.ms-excel` or `text/plain`; `.md`/`.markdown` `text/markdown`, `text/x-markdown` or `text/plain`. 400 `unsupported_file_type`.                                                                                      |
+| legacy Office files | `.doc`, `.ppt`, `.xls` are refused (400 `unsupported_file_type`).                                                                                                                                                                                                                                                                              |
+| size                | at most `DOCUMENT_MAX_BYTES` (100 MiB) declared at presign (413 `file_too_large`) and re-checked against the object that is really in storage at complete.                                                                                                                                                                                     |
+| stored name         | NFC, control characters, path separators and `:*?"<>\|` replaced by `_`, zero-width and bidi characters removed, leading dots stripped, 200 characters at most; the key is built from ids only.                                                                                                                                                |
+| budgets             | `DOCUMENT_UPLOADS_PER_USER_HOUR` (20) uploads per user per hour and `DOCUMENT_ORG_QUOTA_BYTES` (5 GiB) of stored document versions per org (a failed version, or an upload never completed within `UPLOAD_URL_TTL_SECONDS`, no longer counts): 429 `rate_limited` or `quota_exceeded`. Per process; quota checks can race concurrent presigns. |
+
+`POST /v1/content/:id/upload/complete` for a document follows the reordered flow so a hung object store never
+delays a retraction or the parse job: an unlocked pre-read (409 `already_completed` unless the version is
+still awaiting its upload), the multipart complete and `head` with no lock, then the content row lock
+(content first, then version), a re-check that the version is still awaiting upload and the content is not
+retracted (409 `already_completed` / `retracted`), `document_upload_complete(content, version)` (assigns
+`completed_seq`, rotates older completed versions) and one `content.version_uploaded` event. Two concurrent
+completes produce one job; the loser gets 409, not a storage error. After a storage error (NoSuchUpload) the
+request re-reads under the lock and, if the version is still awaiting upload, treats a matching object size as
+completion. The response is the content detail, which for documents carries `document`
+`{format, fileName, mimeType, size, scanStatus: 'not_run'}` (AC-9: nothing scans documents until M8; the UI says so).
+
+**Viewer.** `GET /v1/content/:id/document?cursor&limit` returns the parsed text of the current version as
+`sections` of consecutive chunks that share an anchor (`label`, `page`, `slide`, `sheet`, `rowStart`, `rowEnd`,
+`heading`, taken from the chunk locator), `nextCursor` (ordinal based, `limit` at most 500, default 200),
+`document` (with `scanStatus`) and `downloadPath`. Plain text only: original markup is never returned.
+Chunks of one section can overlap by about 100 characters (the chunking rule). Locator keys read from
+`chunk.locator`: `page`, `slide`, `sheet`, `row_start` and `row_end` (or `rows: [start, end]`), `heading`;
+anything else gives the anchor label "Text".
+
+**Download.** `GET /v1/content/:id/document/original` streams the original through the API (no presigned
+redirect, so retraction applies on the next request) with `Content-Disposition: attachment` (ASCII fallback plus
+RFC 5987 `filename*`), `Content-Type` the canonical type of the format (never an HTML or SVG type),
+`X-Content-Type-Options: nosniff`, `Content-Security-Policy: sandbox; default-src 'none'`,
+`Cross-Origin-Resource-Policy: same-origin`, `X-Frame-Options: DENY` and `Cache-Control: private, no-store`.
+Single `Range` requests (206) are supported; multi-range, malformed and unsatisfiable ranges are 416. At most
+`DOCUMENT_DOWNLOAD_CONCURRENCY` (32) streams run per process and `DOCUMENT_DOWNLOAD_CONCURRENCY_PER_USER` (4)
+per user (429 `rate_limited`); the stream is piped with backpressure and closed when the client goes away.
+
+**The neutral 404.** The viewer and the download answer one fixed response, status 404 and body
+`{"error":{"code":"not_found","message":"not found"}}` (no request id), for a document the caller may not open:
+hidden (draft, processing, failed, scheduled, expired, retracted, no audience path), missing, in another org,
+flag off or kill switch engaged, or not a document. Status, headers other than `Date` and body are
+byte-identical (tested). A deactivated member gets the usual 403 `not_member` on every route.
+
+**List and search.** `GET /v1/streams/:id/documents?cursor&limit` lists the published, live documents of that
+stream the caller may read (`publishAt` descending); a private stream the caller has no role on is 404
+`stream_not_found`. `GET /v1/search/documents?q&streamId&tag&cursor&limit` is the document branch of keyword
+search (ADR-0013): a separate query from `/v1/search`, whose clip and audio HLS clause is unchanged. Results,
+`total` (capped at 1000) and snippets all come from one set filtered by `readerVisibleSql`; snippets are plain
+text with UTF-16 `ranges` and, for text passages, the chunk's `anchor`. `q` is up to 2,000 characters (400
+`validation` above), NFC-normalised, with control characters turned into spaces and zero-width, bidi and
+other format characters removed; empty or noise-only is 200 with no items; any language is accepted
+(`simple` configuration). The text is never stored or logged. Search shares one budget per user with the
+retrieval route: `DOCUMENT_QUERY_RATE_LIMIT_MAX` (60) per minute, 429 `rate_limited` with the body
+`{"error":{"code":"rate_limited","message":"too many requests","requestId":...}}`.
+
+**Notifications.** The publish route emits `content.published` as for a clip, and
+`platform_document_finish` announces once (`source: processing_complete`) when the document is published, live
+and the flag is on. The audience and viewer functions apply the same document gate, so a document whose
+version is processing or failed, or whose org has the flag off, notifies nobody. Notification rows created
+earlier keep their snapshot and `content_id`; the live title is shown only while the document is readable
+(`GET /v1/notifications` is not a 404 surface).
+
+New error codes: `feature_disabled` (403), `unsupported_file_type` (400), `file_too_large` (413),
+`quota_exceeded` (429), `already_completed` (409, reused).

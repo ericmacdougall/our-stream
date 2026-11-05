@@ -64,7 +64,7 @@ All worker-side functions are granted to `ourstream_platform` only and are not o
 | `platform_embedding_chunk_text(org, hashes[])`                      | text for up to 200 hashes, current versions only.                                                                                                |
 | `platform_embedding_upsert(org, hash, pin, vector) -> boolean`      | refuses zero vectors, wrong dimensions, a pin that is not active or shadow, and hashes no chunk of the org references; `ON CONFLICT DO NOTHING`. |
 | `platform_embedding_gc(org) -> int`                                 | removes vectors no chunk references; takes an exclusive advisory lock that waits for in-flight `platform_document_finish` transactions.          |
-| `platform_embedding_coverage(org, pin) -> (total, covered)`         | per-org coverage for the readiness job, which loops over orgs (an org with documents disabled counts as 0 of 0).                                                                                   |
+| `platform_embedding_coverage(org, pin) -> (total, covered)`         | per-org coverage for the readiness job, which loops over orgs (an org with documents disabled counts as 0 of 0).                                 |
 | `platform_embedding_pin_register(model, dims) -> uuid`              | registers a shadow pin (1024 dimensions only).                                                                                                   |
 | `platform_embedding_pin_ready(pin, index_valid, coverage_complete)` | writes the readiness row. Coverage tolerance: zero chunk hashes of current versions without a vector.                                            |
 | `platform_embedding_pin_switch(pin)`                                | refuses unless the target is a shadow pin with a fresh ready row; demotes the old active pin to shadow, then promotes the target.                |
@@ -90,3 +90,21 @@ Run as the platform role. Record each step's result.
 5. Check: no document reachable through any reader path, clip upload, index and search work.
 
 Roll-forward order: deploy the new build, clear the kill switch (`platform_documents_kill_switch_set(false)`), restore the recorded flags (`platform_documents_flag_restore_all()`, which overwrites any admin change made after the switch cleared; accepted), then restore documents (`SELECT * FROM platform_documents_restore();`). Restore touches only recorded rows that are still `draft`, not retracted and whose `updated_at` equals the recorded value; the others are reported (`skipped_modified`, `skipped_retracted`, `skipped_not_draft`). It re-emits `content.published` for a live document's current version (the notification layer dedupes by `published:<versionId>`, so nobody is notified twice) and `content.scheduled` / `content.expiry_scheduled` for a future schedule, bypasses the `content_publish` guard and is idempotent. Both hide and restore write one `audit_event` per org and advance the org epoch.
+
+## API (M2a documents slice)
+
+Routes, limits, headers and error codes are specified in `docs/api.md` ("M2a: documents"). What the database
+page needs from them:
+
+- **Chunk locators.** The viewer and search snippets read `chunk.locator` as jsonb with these keys, all
+  optional: `page` (PDF page, 1-based), `slide` (PPTX slide, 1-based), `sheet` (XLSX sheet name) with
+  `row_start`/`row_end`, `row_start`/`row_end` alone (CSV; `rows: [start, end]` is also read), `heading`
+  (Markdown or DOCX heading text). Anything unreadable becomes the anchor label "Text", so a parser change cannot
+  break the viewer. The parse worker writes them; clip chunks keep `start_ms`.
+- **Flag writes.** The API writes `documents_enabled` (a JSON boolean) at org creation, in the creating
+  transaction, and through `PATCH /v1/org/settings`; it refuses to turn it on while
+  `platform_documents_kill_switch_engaged()`. The API role cannot call `platform_documents_flag_init_missing`,
+  so older orgs without the key are backfilled by an operator or the worker.
+- **Upload complete** calls `document_upload_complete(content, version)` after the content row lock; the
+  storage calls happen before the lock (see `docs/api.md`). `content_publish`'s `feature_disabled` is mapped
+  to 403 `feature_disabled` in `fromDbError`.

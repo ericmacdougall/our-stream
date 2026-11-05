@@ -894,7 +894,7 @@ export interface paths {
         content: {
           'application/json': {
             /** @enum {string} */
-            kind: 'clip' | 'audio';
+            kind: 'clip' | 'audio' | 'document';
             title: string;
             /** @default  */
             description?: string;
@@ -927,7 +927,7 @@ export interface paths {
               /** Format: uuid */
               id: string;
               /** @enum {string} */
-              kind: 'clip' | 'audio';
+              kind: 'clip' | 'audio' | 'document';
               title: string;
               description: string;
               language: string;
@@ -991,6 +991,15 @@ export interface paths {
               )[];
               canEdit: boolean;
               contentEpoch: number;
+              document?: {
+                /** @enum {string} */
+                format: 'pdf' | 'docx' | 'pptx' | 'xlsx' | 'csv' | 'md';
+                fileName: string;
+                mimeType: string;
+                size: number;
+                /** @enum {string} */
+                scanStatus: 'not_run';
+              };
               tags: ('onboarding' | 'announcement' | 'current-events' | 'training')[];
               pinned: boolean;
               likeCount: number;
@@ -1046,7 +1055,7 @@ export interface paths {
               /** Format: uuid */
               id: string;
               /** @enum {string} */
-              kind: 'clip' | 'audio';
+              kind: 'clip' | 'audio' | 'document';
               title: string;
               description: string;
               language: string;
@@ -1110,6 +1119,15 @@ export interface paths {
               )[];
               canEdit: boolean;
               contentEpoch: number;
+              document?: {
+                /** @enum {string} */
+                format: 'pdf' | 'docx' | 'pptx' | 'xlsx' | 'csv' | 'md';
+                fileName: string;
+                mimeType: string;
+                size: number;
+                /** @enum {string} */
+                scanStatus: 'not_run';
+              };
               tags: ('onboarding' | 'announcement' | 'current-events' | 'training')[];
               pinned: boolean;
               likeCount: number;
@@ -1180,7 +1198,7 @@ export interface paths {
               /** Format: uuid */
               id: string;
               /** @enum {string} */
-              kind: 'clip' | 'audio';
+              kind: 'clip' | 'audio' | 'document';
               title: string;
               description: string;
               language: string;
@@ -1244,6 +1262,15 @@ export interface paths {
               )[];
               canEdit: boolean;
               contentEpoch: number;
+              document?: {
+                /** @enum {string} */
+                format: 'pdf' | 'docx' | 'pptx' | 'xlsx' | 'csv' | 'md';
+                fileName: string;
+                mimeType: string;
+                size: number;
+                /** @enum {string} */
+                scanStatus: 'not_run';
+              };
               tags: ('onboarding' | 'announcement' | 'current-events' | 'training')[];
               pinned: boolean;
               likeCount: number;
@@ -1421,7 +1448,7 @@ export interface paths {
               /** Format: uuid */
               id: string;
               /** @enum {string} */
-              kind: 'clip' | 'audio';
+              kind: 'clip' | 'audio' | 'document';
               title: string;
               description: string;
               language: string;
@@ -1485,6 +1512,15 @@ export interface paths {
               )[];
               canEdit: boolean;
               contentEpoch: number;
+              document?: {
+                /** @enum {string} */
+                format: 'pdf' | 'docx' | 'pptx' | 'xlsx' | 'csv' | 'md';
+                fileName: string;
+                mimeType: string;
+                size: number;
+                /** @enum {string} */
+                scanStatus: 'not_run';
+              };
               tags: ('onboarding' | 'announcement' | 'current-events' | 'training')[];
               pinned: boolean;
               likeCount: number;
@@ -1575,7 +1611,7 @@ export interface paths {
               /** Format: uuid */
               id: string;
               /** @enum {string} */
-              kind: 'clip' | 'audio';
+              kind: 'clip' | 'audio' | 'document';
               title: string;
               description: string;
               language: string;
@@ -1639,6 +1675,15 @@ export interface paths {
               )[];
               canEdit: boolean;
               contentEpoch: number;
+              document?: {
+                /** @enum {string} */
+                format: 'pdf' | 'docx' | 'pptx' | 'xlsx' | 'csv' | 'md';
+                fileName: string;
+                mimeType: string;
+                size: number;
+                /** @enum {string} */
+                scanStatus: 'not_run';
+              };
               tags: ('onboarding' | 'announcement' | 'current-events' | 'training')[];
               pinned: boolean;
               likeCount: number;
@@ -1696,7 +1741,7 @@ export interface paths {
               /** Format: uuid */
               id: string;
               /** @enum {string} */
-              kind: 'clip' | 'audio';
+              kind: 'clip' | 'audio' | 'document';
               title: string;
               description: string;
               language: string;
@@ -1760,6 +1805,15 @@ export interface paths {
               )[];
               canEdit: boolean;
               contentEpoch: number;
+              document?: {
+                /** @enum {string} */
+                format: 'pdf' | 'docx' | 'pptx' | 'xlsx' | 'csv' | 'md';
+                fileName: string;
+                mimeType: string;
+                size: number;
+                /** @enum {string} */
+                scanStatus: 'not_run';
+              };
               tags: ('onboarding' | 'announcement' | 'current-events' | 'training')[];
               pinned: boolean;
               likeCount: number;
@@ -1866,6 +1920,276 @@ export interface paths {
               versionId: string;
               /** Format: date-time */
               expiresAt: string;
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/content/{id}/document': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query?: {
+          cursor?: string;
+          limit?: number;
+        };
+        header?: never;
+        path: {
+          id: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Default Response */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': {
+              /** Format: uuid */
+              id: string;
+              /** Format: uuid */
+              versionId: string;
+              title: string;
+              document: {
+                /** @enum {string} */
+                format: 'pdf' | 'docx' | 'pptx' | 'xlsx' | 'csv' | 'md';
+                fileName: string;
+                mimeType: string;
+                size: number;
+                /** @enum {string} */
+                scanStatus: 'not_run';
+              };
+              downloadPath: string;
+              sections: {
+                anchor: {
+                  label: string;
+                  page: number | null;
+                  slide: number | null;
+                  sheet: string | null;
+                  rowStart: number | null;
+                  rowEnd: number | null;
+                  heading: string | null;
+                };
+                chunks: {
+                  ordinal: number;
+                  text: string;
+                }[];
+              }[];
+              nextCursor: string | null;
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/content/{id}/document/original': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Default Response */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content?: never;
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/streams/{id}/documents': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query?: {
+          cursor?: string;
+          limit?: number;
+        };
+        header?: never;
+        path: {
+          id: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Default Response */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': {
+              items: {
+                /** Format: uuid */
+                id: string;
+                title: string;
+                description: string;
+                /** Format: date-time */
+                publishAt: string;
+                owner: {
+                  /** Format: uuid */
+                  id: string;
+                  displayName: string;
+                };
+                /** Format: uuid */
+                versionId: string;
+                document: {
+                  /** @enum {string} */
+                  format: 'pdf' | 'docx' | 'pptx' | 'xlsx' | 'csv' | 'md';
+                  fileName: string;
+                  mimeType: string;
+                  size: number;
+                  /** @enum {string} */
+                  scanStatus: 'not_run';
+                };
+                tags: ('onboarding' | 'announcement' | 'current-events' | 'training')[];
+              }[];
+              nextCursor: string | null;
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/search/documents': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query: {
+          q: string;
+          cursor?: string;
+          limit?: number;
+          streamId?: string;
+          tag?: 'onboarding' | 'announcement' | 'current-events' | 'training';
+        };
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Default Response */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': {
+              items: {
+                /** Format: uuid */
+                id: string;
+                /** @enum {string} */
+                kind: 'document';
+                title: string;
+                description: string;
+                /** Format: date-time */
+                publishAt: string;
+                owner: {
+                  /** Format: uuid */
+                  id: string;
+                  displayName: string;
+                };
+                /** Format: uuid */
+                versionId: string;
+                document: {
+                  /** @enum {string} */
+                  format: 'pdf' | 'docx' | 'pptx' | 'xlsx' | 'csv' | 'md';
+                  fileName: string;
+                  mimeType: string;
+                  size: number;
+                  /** @enum {string} */
+                  scanStatus: 'not_run';
+                };
+                streams: {
+                  /** Format: uuid */
+                  id: string;
+                  name: string;
+                  /** @enum {string} */
+                  kind: 'company' | 'department' | 'team' | 'project' | 'private';
+                }[];
+                tags: ('onboarding' | 'announcement' | 'current-events' | 'training')[];
+                snippets: {
+                  /** @enum {string} */
+                  source: 'title' | 'description' | 'text';
+                  text: string;
+                  ranges: [number, number][];
+                  anchor: {
+                    label: string;
+                    page: number | null;
+                    slide: number | null;
+                    sheet: string | null;
+                    rowStart: number | null;
+                    rowEnd: number | null;
+                    heading: string | null;
+                  } | null;
+                }[];
+                score: number;
+              }[];
+              total: number;
+              nextCursor: string | null;
+              authzEpoch: number;
+              orgContentEpoch: number;
             };
           };
         };
@@ -2739,6 +3063,7 @@ export interface paths {
               engagementRetentionDays: number;
               /** @enum {string} */
               commentScanPolicy: 'off' | 'warn' | 'block';
+              documentsEnabled: boolean;
             };
           };
         };
@@ -2765,6 +3090,7 @@ export interface paths {
             engagementRetentionDays?: number;
             /** @enum {string} */
             commentScanPolicy?: 'off' | 'warn' | 'block';
+            documentsEnabled?: boolean;
           };
         };
       };
@@ -2782,6 +3108,7 @@ export interface paths {
               engagementRetentionDays: number;
               /** @enum {string} */
               commentScanPolicy: 'off' | 'warn' | 'block';
+              documentsEnabled: boolean;
             };
           };
         };
@@ -2876,7 +3203,7 @@ export interface paths {
               /** Format: uuid */
               id: string;
               /** @enum {string} */
-              kind: 'clip' | 'audio';
+              kind: 'clip' | 'audio' | 'document';
               title: string;
               description: string;
               language: string;
@@ -2940,6 +3267,15 @@ export interface paths {
               )[];
               canEdit: boolean;
               contentEpoch: number;
+              document?: {
+                /** @enum {string} */
+                format: 'pdf' | 'docx' | 'pptx' | 'xlsx' | 'csv' | 'md';
+                fileName: string;
+                mimeType: string;
+                size: number;
+                /** @enum {string} */
+                scanStatus: 'not_run';
+              };
               tags: ('onboarding' | 'announcement' | 'current-events' | 'training')[];
               pinned: boolean;
               likeCount: number;
@@ -3005,7 +3341,7 @@ export interface paths {
               /** Format: uuid */
               id: string;
               /** @enum {string} */
-              kind: 'clip' | 'audio';
+              kind: 'clip' | 'audio' | 'document';
               title: string;
               description: string;
               language: string;
@@ -3069,6 +3405,15 @@ export interface paths {
               )[];
               canEdit: boolean;
               contentEpoch: number;
+              document?: {
+                /** @enum {string} */
+                format: 'pdf' | 'docx' | 'pptx' | 'xlsx' | 'csv' | 'md';
+                fileName: string;
+                mimeType: string;
+                size: number;
+                /** @enum {string} */
+                scanStatus: 'not_run';
+              };
               tags: ('onboarding' | 'announcement' | 'current-events' | 'training')[];
               pinned: boolean;
               likeCount: number;
@@ -3113,7 +3458,7 @@ export interface paths {
               /** Format: uuid */
               id: string;
               /** @enum {string} */
-              kind: 'clip' | 'audio';
+              kind: 'clip' | 'audio' | 'document';
               title: string;
               description: string;
               language: string;
@@ -3177,6 +3522,15 @@ export interface paths {
               )[];
               canEdit: boolean;
               contentEpoch: number;
+              document?: {
+                /** @enum {string} */
+                format: 'pdf' | 'docx' | 'pptx' | 'xlsx' | 'csv' | 'md';
+                fileName: string;
+                mimeType: string;
+                size: number;
+                /** @enum {string} */
+                scanStatus: 'not_run';
+              };
               tags: ('onboarding' | 'announcement' | 'current-events' | 'training')[];
               pinned: boolean;
               likeCount: number;

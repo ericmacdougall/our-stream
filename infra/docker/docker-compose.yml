@@ -126,6 +126,9 @@ services:
       # gateway (docs/deployment.md "Trust chain").
       TRUST_PROXY: ${EDGE_ADDRESS:-10.228.0.254}/32
       S3_CORS_ORIGINS: ${S3_CORS_ORIGINS:-}
+      # M2a: value written to org.settings.documents_enabled when an org is created. Self-host compose
+      # defaults to on; the API itself (hosted, Helm) defaults to off. An org without the key is off.
+      DOCUMENTS_ENABLED_DEFAULT: ${DOCUMENTS_ENABLED_DEFAULT:-true}
     ports:
       - '${BIND_ADDR:-127.0.0.1}:${API_PORT:-4000}:4000'
     networks: [edge, backend]
