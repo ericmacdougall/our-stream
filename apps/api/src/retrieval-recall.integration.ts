@@ -5,7 +5,7 @@
 // variant: fallback disabled, which MUST fail the same assertion). Settings under test: hnsw.ef_search,
 // hnsw.iterative_scan = relaxed_order and hnsw.max_scan_tuples from lib/retrieval/constants.ts.
 import { randomUUID } from 'node:crypto';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { ensurePinIndex, withTenant } from '@our-stream/db';
 import {
   applyApproxSettings,
@@ -28,6 +28,9 @@ import {
   vectorFor,
   type World,
 } from './retrieval-test-support.js';
+
+// Chatty suites: a remote database (dev2 through a tunnel) multiplies round trips.
+vi.setConfig({ testTimeout: 900_000, hookTimeout: 900_000 });
 
 const DOCS_PER_ORG = [67, 67, 66];
 const CHUNKS_PER_DOC = 100;

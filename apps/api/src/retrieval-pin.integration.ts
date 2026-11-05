@@ -2,7 +2,7 @@
 // AC-3/AC-4: retrieval stays on the ACTIVE pin while a shadow pin fills, switches with it, writes the new pin
 // id as a literal into the SQL text, and the EXPLAIN assertion (HNSW index scan) holds after the switch too.
 // An embedder whose model is not the active pin's model is never used (keyword_only, pin_mismatch).
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { ensurePinIndex, pinIndexName, reportPinReadiness, withTenant } from '@our-stream/db';
 import { applyApproxSettings, buildApproxSql, DEFAULT_TUNING } from './lib/retrieval/engine.js';
 import {
@@ -19,6 +19,9 @@ import {
   seedContent,
   type World,
 } from './retrieval-test-support.js';
+
+// Chatty suites: a remote database (dev2 through a tunnel) multiplies round trips.
+vi.setConfig({ testTimeout: 900_000, hookTimeout: 900_000 });
 
 describe.skipIf(!dbReady)('retrieval across an embedding pin switch', () => {
   let w: World;

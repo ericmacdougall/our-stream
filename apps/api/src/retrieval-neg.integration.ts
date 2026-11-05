@@ -5,7 +5,7 @@
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import pg from 'pg';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { withTenant, type TenantClient } from '@our-stream/db';
 import { FixedWindowLimiter } from './lib/limits.js';
 import { EmbedRefusedError } from './lib/retrieval/embedder.js';
@@ -37,6 +37,9 @@ import {
   sessionFor,
   type World,
 } from './retrieval-test-support.js';
+
+// Chatty suites: a remote database (dev2 through a tunnel) multiplies round trips.
+vi.setConfig({ testTimeout: 900_000, hookTimeout: 900_000 });
 
 const bigLimiter = () => new FixedWindowLimiter({ max: 1_000_000, windowMs: 60_000 });
 const orgWide = (orgId: string) => [
@@ -697,10 +700,12 @@ describe.skipIf(!dbReady)('retrieval: negatives, timing and cache contract', () 
     it('NEG-7: 60 per user per minute by default, then 429 with a stable body', async () => {
       const u = await insertUser(w, 'ratelimited');
       await addMember(w, orgA, u, 'member');
+      // The limiter runs on the request's captured clock, so a slow environment cannot stretch the window.
+      let tNow = Date.now();
       const limited = await buildRetrievalApp(w, {
         embedder,
         cache: new PermittedIdCache(),
-        now: () => clock(),
+        now: () => new Date(tNow),
       });
       try {
         const tk = await token(u, orgA);
@@ -714,6 +719,9 @@ describe.skipIf(!dbReady)('retrieval: negatives, timing and cache contract', () 
         expect(strip(a.raw).code).toBe('rate_limited');
         expect(strip(a.raw).message).toBe('too many requests');
         expect(strip(b.raw).message).toBe(strip(a.raw).message);
+        // the window rolls after a minute
+        tNow += 61_000;
+        expect((await query(limited, tk, 'alpha', 1)).status).toBe(200);
         // another user is not affected
         expect((await query(limited, await token(control, orgA), 'alpha', 1)).status).toBe(200);
       } finally {

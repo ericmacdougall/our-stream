@@ -84,7 +84,9 @@ export function registerRetrievalRoutes(
     },
     async (req) => {
       const auth = requireMember(req);
-      if (!limiter.allow(auth.userId)) throw new ApiError(429, 'rate_limited', 'too many requests');
+      const now = clock(); // the one captured :now of this request (also the limiter's clock)
+      if (!limiter.allow(auth.userId, now.getTime()))
+        throw new ApiError(429, 'rate_limited', 'too many requests');
       const q = normalizeRetrievalQuery(req.body.q);
       if (q.length === 0)
         return { items: [], retrievalMode: 'keyword_only' as const, degraded: null };
@@ -95,7 +97,6 @@ export function registerRetrievalRoutes(
         q,
         options.embedTimeoutMs ?? EMBED_TIMEOUT_MS,
       );
-      const now = clock();
       let toCache: { key: Parameters<PermittedIdCache['put']>[0]; ids: string[] } | null = null;
       const result = await withTenant(
         ctx.pool,

@@ -5,17 +5,19 @@
 // by the same assertions. Vectors are seeded through platform_embedding_upsert, chunks are direct inserts that
 // the core trigger hashes. Runs in its own scratch database (deployment-global state is toggled).
 import type { FastifyInstance } from 'fastify';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { buildFixture, NOW, readerVisible, USER_NAMES, type FixtureOrg } from '@our-stream/authz';
 import { withTenant } from '@our-stream/db';
 import { FixedWindowLimiter } from './lib/limits.js';
 import {
   applyApproxSettings,
   buildApproxSql,
+  retrieve,
   DEFAULT_TUNING,
   type EngineVariant,
 } from './lib/retrieval/engine.js';
 import { readCounter, LEAK_CHECK_FAILED } from './lib/retrieval/metrics.js';
+import { referencePostCheck } from './lib/retrieval/reference-check.js';
 import {
   addMember,
   buildRetrievalApp,
@@ -38,6 +40,9 @@ import {
   DEFAULT_PIN_ID,
   type World,
 } from './retrieval-test-support.js';
+
+// Chatty suites: a remote database (dev2 through a tunnel) multiplies round trips.
+vi.setConfig({ testTimeout: 900_000, hookTimeout: 900_000 });
 
 const FIXED_NOW = NOW;
 
@@ -201,6 +206,49 @@ describe.skipIf(!dbReady)('retrieval over the authz fixture matrix', () => {
       if (expected.size > 0) nonZero += 1;
     }
     expect(nonZero).toBeGreaterThan(30);
+  });
+
+  it('post-check cost at k up to 20 (owner-chosen budget: p95 at most 20 ms on dev2; measured and printed, not asserted)', async () => {
+    const org = fixture.orgs[0]!;
+    // the fixture user with the most permitted chunks
+    const userId = USER_NAMES.map((n) => fixture.users[n]!).sort(
+      (a, b) => expectedChunks(org, b).size - expectedChunks(org, a).size,
+    )[0]!;
+    const want = Math.min(20, expectedChunks(org, userId).size);
+    expect(want).toBeGreaterThan(5);
+    const times: number[] = [];
+    for (let i = 0; i < 40; i += 1) {
+      await withTenant(
+        w.app,
+        { orgId: org.orgId, userId },
+        async (client) => {
+          const r = await retrieve(
+            client,
+            engineInput(org.orgId, userId, 'onboarding policy', { k: 20, now: FIXED_NOW }),
+          );
+          expect(r.items.length).toBe(want);
+          const t0 = performance.now();
+          await referencePostCheck(
+            client,
+            org.orgId,
+            userId,
+            FIXED_NOW,
+            r.items.map((x) => ({
+              chunkId: x.chunkId,
+              contentId: x.contentId,
+              versionId: x.versionId,
+            })),
+          );
+          times.push(performance.now() - t0);
+        },
+        { isolation: 'REPEATABLE READ' },
+      );
+    }
+    times.sort((a, b) => a - b);
+    console.log(
+      `post-check k=${want} over ${times.length} runs: p50=${times[20]!.toFixed(1)}ms p95=${times[37]!.toFixed(1)}ms`,
+    );
+    expect(times.length).toBe(40);
   });
 
   describe('broken variants must be detected by the same assertions', () => {
