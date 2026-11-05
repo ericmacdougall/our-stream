@@ -14,6 +14,17 @@ export interface PredicateParams {
   now?: string;
 }
 
+/**
+ * The document gate of the one predicate (ADR-0002, M2a): non-documents pass; a document needs the org
+ * flag and deployment kill switch (platform_documents_enabled, an uncorrelated InitPlan evaluated once per
+ * query, which asserts the org equals the tenant context) and a content_version row, the content's current
+ * version, whose status is 'current'.
+ */
+export function documentGateSql(p: PredicateParams): string {
+  const c = p.contentAlias ?? 'c';
+  return `(${c}.kind <> 'document' OR ((SELECT platform_documents_enabled(${p.org})) AND EXISTS (SELECT 1 FROM content_version cv WHERE cv.org_id = ${c}.org_id AND cv.id = ${c}.current_version_id AND cv.status = 'current')))`;
+}
+
 export function readerVisibleSql(p: PredicateParams): string {
   const c = p.contentAlias ?? 'c';
   const now = p.now ?? 'now()';
@@ -24,6 +35,7 @@ export function readerVisibleSql(p: PredicateParams): string {
     AND ${c}.publish_at IS NOT NULL AND ${c}.publish_at <= ${now}
     AND (${c}.expires_at IS NULL OR ${c}.expires_at > ${now})
     AND ${c}.retracted_at IS NULL
+    AND ${documentGateSql(p)}
     AND EXISTS (
       SELECT 1 FROM content_audience a
       WHERE a.org_id = ${c}.org_id AND a.content_id = ${c}.id AND (

@@ -95,6 +95,12 @@ export function readerVisible(
   if (!c) return false;
   if (c.state !== 'published') return false;
   if (c.retractedAt !== null) return false;
+  // Document gate (M2a): a document is reader-visible only while documents are enabled for the org and
+  // the content's current version is `current` (a processing or failed version never is).
+  if (c.kind === 'document') {
+    if (!snap.documentsEnabled || snap.documentsKillSwitch) return false;
+    if (c.currentVersionStatus !== 'current') return false;
+  }
   if (c.publishAt === null || c.publishAt.getTime() > now.getTime()) return false;
   if (c.expiresAt !== null && c.expiresAt.getTime() <= now.getTime()) return false;
   return hasAudiencePath(snap, userId, contentId);

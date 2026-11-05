@@ -9,6 +9,7 @@ export {
 } from './reference.js';
 export {
   readerVisibleSql,
+  documentGateSql,
   authorAccessibleSql,
   auditorAccessibleSql,
   type PredicateParams,

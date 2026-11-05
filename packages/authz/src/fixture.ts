@@ -42,6 +42,22 @@ export type ContentName =
   | 'deptPrivateMixed'
   | 'orgPublished';
 
+/**
+ * Document fixtures (M2a), present only with `buildFixture(suffix, { documents: true })` so suites that
+ * seed every fixture row as a clip keep their expectations.
+ */
+export type DocumentName =
+  | 'docCompany'
+  | 'docDept'
+  | 'docDirect'
+  | 'docProcessing'
+  | 'docFailed'
+  | 'docNoVersion'
+  | 'docDraftCurrent'
+  | 'docScheduled'
+  | 'docExpired'
+  | 'docRetracted';
+
 export interface FixtureOrg extends OrgSnapshot {
   slug: string;
   users: FixtureUsers;
@@ -49,6 +65,8 @@ export interface FixtureOrg extends OrgSnapshot {
   groupNames: Record<GroupName, string>;
   streamNames: Record<StreamName, string>;
   contentNames: Record<ContentName, string>;
+  /** Empty unless documents were requested. */
+  documentNames: Partial<Record<DocumentName, string>>;
 }
 
 function tuple(
@@ -62,7 +80,11 @@ function tuple(
   return { objectType, objectId, relation, subjectType, subjectId, subjectRelation };
 }
 
-export function buildOrg(slug: string, userIds: FixtureUsers): FixtureOrg {
+export function buildOrg(
+  slug: string,
+  userIds: FixtureUsers,
+  opts: { documents?: boolean; documentsEnabled?: boolean } = {},
+): FixtureOrg {
   const orgId = randomUUID();
   const u = userIds;
   const roles: Partial<Record<UserName, OrgRole>> = {
@@ -190,6 +212,8 @@ export function buildOrg(slug: string, userIds: FixtureUsers): FixtureOrg {
 
   const base = (id: string, owner: string, over: Partial<ContentRow> = {}): ContentRow => ({
     id,
+    kind: 'clip',
+    currentVersionStatus: 'current',
     ownerId: owner,
     state: 'published',
     publishAt: new Date(NOW.getTime() - HOUR),
@@ -216,11 +240,44 @@ export function buildOrg(slug: string, userIds: FixtureUsers): FixtureOrg {
     base(contentNames.retracted, u.announcer!, {
       state: 'retracted',
       retractedAt: new Date(NOW.getTime() - 1000),
+      currentVersionStatus: 'retracted',
     }),
     base(contentNames.noAudience, u.contributor!),
     base(contentNames.deptPrivateMixed, u.contributor!),
     base(contentNames.orgPublished, u.announcer),
   ];
+
+  const documentNames: Partial<Record<DocumentName, string>> = {};
+  if (opts.documents) {
+    const doc = (
+      name: DocumentName,
+      owner: string,
+      audience: Tuple | null,
+      over: Partial<ContentRow> = {},
+    ) => {
+      const id = randomUUID();
+      documentNames[name] = id;
+      if (audience) tuples.push({ ...audience, objectId: id });
+      content.push(base(id, owner, { kind: 'document', ...over }));
+    };
+    const company = tuple('content', '', 'viewer', 'stream', streamNames.company, 'viewer');
+    const dept = tuple('content', '', 'viewer', 'stream', streamNames.department, 'viewer');
+    const orgWide = tuple('content', '', 'viewer', 'org', orgId, 'member');
+    doc('docCompany', u.contributor!, company);
+    doc('docDept', u.contributor!, dept);
+    doc('docDirect', u.contributor!, tuple('content', '', 'viewer', 'user', u.member!));
+    doc('docProcessing', u.contributor!, orgWide, { currentVersionStatus: 'processing' });
+    doc('docFailed', u.contributor!, orgWide, { currentVersionStatus: 'failed' });
+    doc('docNoVersion', u.contributor!, orgWide, { currentVersionStatus: null });
+    doc('docDraftCurrent', u.contributor!, orgWide, { state: 'draft', publishAt: null });
+    doc('docScheduled', u.contributor!, orgWide, { publishAt: new Date(NOW.getTime() + HOUR) });
+    doc('docExpired', u.contributor!, orgWide, { expiresAt: new Date(NOW.getTime() - 1000) });
+    doc('docRetracted', u.contributor!, orgWide, {
+      state: 'retracted',
+      retractedAt: new Date(NOW.getTime() - 1000),
+      currentVersionStatus: 'retracted',
+    });
+  }
 
   return {
     orgId,
@@ -233,13 +290,27 @@ export function buildOrg(slug: string, userIds: FixtureUsers): FixtureOrg {
     tuples,
     content,
     contentNames,
+    documentNames,
+    documentsEnabled: opts.documentsEnabled ?? false,
+    documentsKillSwitch: false,
     users: userIds,
   };
 }
 
 /** Two orgs sharing the same user accounts (overlapping emails) so cross-org leaks are testable. */
 /** `suffix` keeps concurrently running suites from sharing org slugs. */
-export function buildFixture(suffix = ''): { users: FixtureUsers; orgs: [FixtureOrg, FixtureOrg] } {
+export function buildFixture(
+  suffix = '',
+  opts: { documents?: boolean } = {},
+): { users: FixtureUsers; orgs: [FixtureOrg, FixtureOrg] } {
   const users = Object.fromEntries(USER_NAMES.map((n) => [n, randomUUID()])) as FixtureUsers;
-  return { users, orgs: [buildOrg(`acme${suffix}`, users), buildOrg(`globex${suffix}`, users)] };
+  // With documents, the first org has the documents flag on and the second off (every document cell of
+  // the second org must be invisible).
+  return {
+    users,
+    orgs: [
+      buildOrg(`acme${suffix}`, users, { ...opts, documentsEnabled: opts.documents === true }),
+      buildOrg(`globex${suffix}`, users, { ...opts, documentsEnabled: false }),
+    ],
+  };
 }

@@ -7,6 +7,9 @@ export type SubjectType = 'user' | 'group' | 'stream' | 'org';
 export type OrgRole = 'owner' | 'admin' | 'announcer' | 'contributor' | 'member' | 'auditor';
 export type StreamRole = 'viewer' | 'contributor' | 'moderator' | 'owner';
 export type ContentState = 'draft' | 'published' | 'retracted';
+export type ContentKind = 'clip' | 'audio' | 'document';
+export type VersionStatus =
+  'uploaded' | 'processing' | 'current' | 'superseded' | 'retracted' | 'failed';
 
 export interface Tuple {
   objectType: ObjectType;
@@ -26,6 +29,9 @@ export interface Membership {
 
 export interface ContentRow {
   id: string;
+  kind: ContentKind;
+  /** Status of the version content.current_version_id points at; null when there is no current version row. */
+  currentVersionStatus: VersionStatus | null;
   ownerId: string;
   state: ContentState;
   publishAt: Date | null;
@@ -47,6 +53,10 @@ export interface OrgSnapshot {
   streams: string[];
   tuples: Tuple[];
   content: ContentRow[];
+  /** Org flag `documents_enabled` (an absent key is false). */
+  documentsEnabled: boolean;
+  /** Deployment kill switch (platform.documents_kill_switch); true overrides every org flag. */
+  documentsKillSwitch: boolean;
 }
 
 export const STREAM_ROLE_RANK: Record<StreamRole, number> = {

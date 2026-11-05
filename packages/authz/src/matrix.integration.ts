@@ -7,10 +7,11 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import fc from 'fast-check';
 import pg from 'pg';
+import { randomUUID } from 'node:crypto';
 import { createPool, runMigrations, withTenant } from '@our-stream/db';
 import { buildFixture, NOW, type FixtureOrg } from './fixture.js';
 import { authorAccessible, readerVisible } from './reference.js';
-import { authorAccessibleSql, readerVisibleSql } from './sql.js';
+import { authorAccessibleSql, documentGateSql, readerVisibleSql } from './sql.js';
 
 const adminUrl = process.env['DATABASE_ADMIN_URL'];
 const appUrl = process.env['DATABASE_URL'];
@@ -18,7 +19,11 @@ const NOW_SQL = `'${NOW.toISOString()}'::timestamptz`;
 
 async function seedOrg(admin: pg.Client, org: FixtureOrg, users: Record<string, string>) {
   await admin.query(`SELECT set_config('app.org_id', $1, false)`, [org.orgId]);
-  await admin.query('INSERT INTO org (id, slug, name) VALUES ($1, $2, $2)', [org.orgId, org.slug]);
+  await admin.query('INSERT INTO org (id, slug, name, settings) VALUES ($1, $2, $2, $3::jsonb)', [
+    org.orgId,
+    org.slug,
+    JSON.stringify({ documents_enabled: org.documentsEnabled }),
+  ]);
   for (const m of org.memberships) {
     await admin.query(
       'INSERT INTO org_membership (org_id, user_id, role, status) VALUES ($1, $2, $3, $4)',
@@ -44,7 +49,7 @@ async function seedOrg(admin: pg.Client, org: FixtureOrg, users: Record<string, 
   for (const c of org.content) {
     await admin.query(
       `INSERT INTO content (org_id, id, kind, owner_id, title, state, publish_at, expires_at, retracted_at, review_requested)
-       VALUES ($1, $2, 'clip', $3, $4, $5, $6, $7, $8, $9)`,
+       VALUES ($1, $2, $10::content_kind, $3, $4, $5, $6, $7, $8, $9)`,
       [
         org.orgId,
         c.id,
@@ -55,11 +60,13 @@ async function seedOrg(admin: pg.Client, org: FixtureOrg, users: Record<string, 
         c.expiresAt,
         c.retractedAt,
         c.reviewRequested,
+        c.kind,
       ],
     );
+    if (c.currentVersionStatus === null) continue; // a document without any version row
     const v = await admin.query<{ id: string }>(
       `INSERT INTO content_version (org_id, content_id, status) VALUES ($1, $2, $3) RETURNING id`,
-      [org.orgId, c.id, c.state === 'retracted' ? 'retracted' : 'current'],
+      [org.orgId, c.id, c.currentVersionStatus],
     );
     await admin.query('UPDATE content SET current_version_id = $3 WHERE org_id = $1 AND id = $2', [
       org.orgId,
@@ -98,12 +105,29 @@ async function seedOrg(admin: pg.Client, org: FixtureOrg, users: Record<string, 
 }
 
 describe.skipIf(!adminUrl || !appUrl)('authz fixture matrix (integration)', () => {
-  const fixture = buildFixture();
-  const admin = new pg.Client({ connectionString: adminUrl });
-  const pool = createPool(appUrl ?? '');
+  const fixture = buildFixture('', { documents: true });
+  // The matrix toggles deployment-global state (the documents kill switch), so it runs in its own database
+  // and never disturbs suites that share DATABASE_ADMIN_URL.
+  const scratchName = `matrix_${randomUUID().replace(/-/g, '').slice(0, 10)}`;
+  const swapDb = (url: string) => {
+    const u = new URL(url);
+    u.pathname = `/${scratchName}`;
+    return u.toString();
+  };
+  let admin: pg.Client;
+  let pool: pg.Pool;
 
   beforeAll(async () => {
-    await runMigrations(adminUrl!);
+    const root = new pg.Client({ connectionString: adminUrl });
+    await root.connect();
+    await root.query(`CREATE DATABASE ${scratchName}`);
+    await root.query(
+      `GRANT CONNECT ON DATABASE ${scratchName} TO ourstream_app, ourstream_platform`,
+    );
+    await root.end();
+    await runMigrations(swapDb(adminUrl!));
+    admin = new pg.Client({ connectionString: swapDb(adminUrl!) });
+    pool = createPool(swapDb(appUrl!));
     await admin.connect();
     await admin.query('BEGIN');
     // Orgs first: content.owner_id references org_membership with RESTRICT; dropping the org cascades content away.
@@ -120,10 +144,12 @@ describe.skipIf(!adminUrl || !appUrl)('authz fixture matrix (integration)', () =
   });
 
   afterAll(async () => {
-    await admin.query(`DELETE FROM org WHERE slug IN ('acme','globex')`);
-    await admin.query(`DELETE FROM platform.user_account WHERE email_normalized LIKE 'matrix-%'`);
     await admin.end();
     await pool.end();
+    const root = new pg.Client({ connectionString: adminUrl });
+    await root.connect();
+    await root.query(`DROP DATABASE IF EXISTS ${scratchName} WITH (FORCE)`);
+    await root.end();
   });
 
   async function sqlReaderVisibleApp(org: FixtureOrg, userId: string): Promise<Set<string>> {
@@ -136,6 +162,8 @@ describe.skipIf(!adminUrl || !appUrl)('authz fixture matrix (integration)', () =
     });
   }
   async function sqlReaderVisibleAdmin(org: FixtureOrg, userId: string): Promise<Set<string>> {
+    // The document gate (platform_documents_enabled) asserts the org equals the tenant context.
+    await admin.query(`SELECT set_config('app.org_id', $1, false)`, [org.orgId]);
     const r = await admin.query<{ id: string }>(
       `SELECT c.id FROM content c WHERE ${readerVisibleSql({ org: '$1', user: '$2', now: NOW_SQL })}`,
       [org.orgId, userId],
@@ -203,6 +231,7 @@ describe.skipIf(!adminUrl || !appUrl)('authz fixture matrix (integration)', () =
       'TRUE',
     );
     expect(broken).not.toEqual(readerVisibleSql({ org: '$1', user: '$2', now: NOW_SQL }));
+    await admin.query(`SELECT set_config('app.org_id', $1, false)`, [acme.orgId]);
     const r = await admin.query<{ id: string }>(`SELECT c.id FROM content c WHERE ${broken}`, [
       acme.orgId,
       fixture.users.deactivated,
@@ -303,6 +332,236 @@ describe.skipIf(!adminUrl || !appUrl)('authz fixture matrix (integration)', () =
       (r) => !readerVisible(acme, fixture.users.member!, r.content_id, NOW),
     );
     expect(leaked.length).toBeGreaterThan(0);
+  });
+
+  // ---------------------------------------------------------------------------------------------
+  // M2a document gate: kind, current-version status, org flag and deployment kill switch.
+  // ---------------------------------------------------------------------------------------------
+  const docIds = (org: FixtureOrg) => new Set(Object.values(org.documentNames) as string[]);
+
+  async function allVisibleDocs(org: FixtureOrg): Promise<Map<string, Set<string>>> {
+    const out = new Map<string, Set<string>>();
+    for (const [name, userId] of Object.entries(fixture.users)) {
+      const got = await sqlReaderVisibleApp(org, userId);
+      out.set(name, new Set([...got].filter((id) => docIds(org).has(id))));
+    }
+    return out;
+  }
+
+  it('documents: SQL agrees with the reference; permitted roles see a non-zero number of documents', async () => {
+    const [acme, globex] = fixture.orgs;
+    expect(docIds(acme).size).toBeGreaterThanOrEqual(10);
+    const visible = await allVisibleDocs(acme);
+    for (const [name, userId] of Object.entries(fixture.users)) {
+      for (const id of docIds(acme)) {
+        expect(visible.get(name)!.has(id), `acme ${name} ${id}`).toBe(
+          readerVisible(acme, userId, id, NOW),
+        );
+      }
+    }
+    // Positive polarity: the documents a role may see are not an empty set (a vacuous matrix fails here).
+    expect(visible.get('member')!.size).toBeGreaterThan(0);
+    expect(visible.get('contributor')!.size).toBeGreaterThanOrEqual(2);
+    expect(visible.get('member')!.has(acme.documentNames.docCompany!)).toBe(true);
+    expect(visible.get('member')!.has(acme.documentNames.docDirect!)).toBe(true);
+    expect(visible.get('member2')!.has(acme.documentNames.docDirect!)).toBe(false);
+    // Negative polarity: processing, failed, no-version, draft, scheduled, expired and retracted documents.
+    for (const name of [
+      'docProcessing',
+      'docFailed',
+      'docNoVersion',
+      'docDraftCurrent',
+      'docScheduled',
+      'docExpired',
+      'docRetracted',
+    ] as const) {
+      for (const [who, set] of visible)
+        expect(set.has(acme.documentNames[name]!), `${who} ${name}`).toBe(false);
+    }
+    // The second org has the flag off: every document is invisible to everyone there.
+    const off = await allVisibleDocs(globex);
+    for (const [who, set] of off) expect(set.size, `globex ${who}`).toBe(0);
+    for (const [, userId] of Object.entries(fixture.users)) {
+      for (const id of docIds(globex)) expect(readerVisible(globex, userId, id, NOW)).toBe(false);
+    }
+  });
+
+  it('documents: the org flag and the kill switch hide every document on the next query and advance the org epoch', async () => {
+    const [acme] = fixture.orgs;
+    const epoch = async () => {
+      await admin.query(`SELECT set_config('app.org_id', $1, false)`, [acme.orgId]);
+      const r = await admin.query<{ e: string }>(
+        'SELECT current_org_content_epoch($1)::text AS e',
+        [acme.orgId],
+      );
+      return Number(r.rows[0]!.e);
+    };
+    const before = await allVisibleDocs(acme);
+    expect([...before.values()].reduce((n, s) => n + s.size, 0)).toBeGreaterThan(0);
+
+    let e0 = await epoch();
+    await admin.query(
+      `UPDATE org SET settings = settings || '{"documents_enabled": false}' WHERE id = $1`,
+      [acme.orgId],
+    );
+    let e1 = await epoch();
+    expect(e1).toBeGreaterThan(e0);
+    const offSnap = { ...acme, documentsEnabled: false };
+    for (const [name, userId] of Object.entries(fixture.users)) {
+      const got = await sqlReaderVisibleApp(acme, userId);
+      for (const id of docIds(acme)) {
+        expect(got.has(id)).toBe(false);
+        expect(readerVisible(offSnap, userId, id, NOW)).toBe(false);
+      }
+      // Clips are unaffected by the flag.
+      for (const c of acme.content.filter((x) => x.kind === 'clip'))
+        expect(got.has(c.id), `${name} clip`).toBe(readerVisible(acme, userId, c.id, NOW));
+    }
+    // An org with no documents_enabled key behaves as off.
+    await admin.query(`UPDATE org SET settings = settings - 'documents_enabled' WHERE id = $1`, [
+      acme.orgId,
+    ]);
+    expect([...(await allVisibleDocs(acme)).values()].reduce((n, s) => n + s.size, 0)).toBe(0);
+    await admin.query(
+      `UPDATE org SET settings = settings || '{"documents_enabled": true}' WHERE id = $1`,
+      [acme.orgId],
+    );
+    expect(
+      [...(await allVisibleDocs(acme)).values()].reduce((n, s) => n + s.size, 0),
+    ).toBeGreaterThan(0);
+
+    // Kill switch: overrides the org flag, advances the epoch of every org, and the reference carries it too.
+    e0 = await epoch();
+    await admin.query('SELECT platform_documents_kill_switch_set(true)');
+    e1 = await epoch();
+    expect(e1).toBeGreaterThan(e0);
+    const killSnap = { ...acme, documentsKillSwitch: true };
+    for (const [, userId] of Object.entries(fixture.users)) {
+      const got = await sqlReaderVisibleApp(acme, userId);
+      for (const id of docIds(acme)) {
+        expect(got.has(id)).toBe(false);
+        expect(readerVisible(killSnap, userId, id, NOW)).toBe(false);
+      }
+    }
+    await admin.query('SELECT platform_documents_kill_switch_set(false)');
+    expect(
+      [...(await allVisibleDocs(acme)).values()].reduce((n, s) => n + s.size, 0),
+    ).toBeGreaterThan(0);
+  });
+
+  it('control: a predicate without the document gate disagrees with the reference (leaks processing documents)', async () => {
+    const [acme] = fixture.orgs;
+    const sql = readerVisibleSql({ org: '$1', user: '$2', now: NOW_SQL });
+    const gate = documentGateSql({ org: '$1', user: '$2', now: NOW_SQL });
+    expect(sql).toContain(gate);
+    const broken = sql.replace(gate, 'TRUE');
+    await admin.query(`SELECT set_config('app.org_id', $1, false)`, [acme.orgId]);
+    const r = await admin.query<{ id: string }>(`SELECT c.id FROM content c WHERE ${broken}`, [
+      acme.orgId,
+      fixture.users.member,
+    ]);
+    const got = new Set(r.rows.map((x) => x.id));
+    expect(got.has(acme.documentNames.docProcessing!)).toBe(true); // the leak the real gate prevents
+    const disagreements = acme.content.filter(
+      (c) => got.has(c.id) !== readerVisible(acme, fixture.users.member!, c.id, NOW),
+    );
+    expect(disagreements.length).toBeGreaterThan(0);
+  });
+
+  it('the gate is an uncorrelated InitPlan: platform_documents_enabled is evaluated once per query, not per row', async () => {
+    const [acme] = fixture.orgs;
+    await admin.query(`SELECT set_config('app.org_id', $1, false)`, [acme.orgId]);
+    const plan = await admin.query<{ 'QUERY PLAN': string }>(
+      `EXPLAIN (VERBOSE, COSTS OFF) SELECT c.id FROM content c WHERE ${readerVisibleSql({ org: '$1', user: '$2' })}`,
+      [acme.orgId, fixture.users.member],
+    );
+    const text = plan.rows.map((r) => r['QUERY PLAN']).join('\n');
+    expect(text).toMatch(/InitPlan/);
+    expect(text.match(/platform_documents_enabled/g)?.length).toBe(1);
+  });
+
+  it('parity: platform_audience_of_content equals the reference predicate for every content (real clock)', async () => {
+    const now = new Date();
+    let nonEmpty = 0;
+    let docNonEmpty = 0;
+    for (const org of fixture.orgs) {
+      for (const c of org.content) {
+        const r = await admin.query<{ user_id: string }>(
+          'SELECT user_id FROM platform_audience_of_content($1, $2)',
+          [org.orgId, c.id],
+        );
+        const got = new Set(r.rows.map((x) => x.user_id));
+        const want = new Set(
+          Object.values(fixture.users).filter((u) => readerVisible(org, u, c.id, now)),
+        );
+        expect([...got].sort(), `${org.slug} ${c.kind} ${c.id}`).toEqual([...want].sort());
+        if (got.size > 0) nonEmpty += 1;
+        if (got.size > 0 && c.kind === 'document') docNonEmpty += 1;
+      }
+    }
+    expect(nonEmpty).toBeGreaterThan(5);
+    expect(docNonEmpty).toBeGreaterThan(0);
+  });
+
+  it('parity: platform_digest_items shows a title exactly when the reference says the content is reader-visible', async () => {
+    const now = new Date();
+    let titled = 0;
+    let titledDocs = 0;
+    for (const org of fixture.orgs) {
+      for (const [, userId] of Object.entries(fixture.users)) {
+        const ids: string[] = [];
+        const byNotification = new Map<string, string>();
+        for (const c of org.content) {
+          const n = await admin.query<{ id: string }>(
+            `INSERT INTO notification (org_id, user_id, kind, reason, content_id, dedupe_key)
+             VALUES ($1, $2, 'content.published', 'audience', $3, $4) RETURNING id`,
+            [org.orgId, userId, c.id, `parity:${c.id}:${Math.random()}`],
+          );
+          ids.push(n.rows[0]!.id);
+          byNotification.set(n.rows[0]!.id, c.id);
+        }
+        const r = await admin.query<{ items: Array<{ id: string; title: string | null }> }>(
+          'SELECT platform_digest_items($1, $2, $3::uuid[]) AS items',
+          [org.orgId, userId, ids],
+        );
+        expect(r.rows[0]!.items.length).toBe(org.content.length);
+        for (const item of r.rows[0]!.items) {
+          const cid = byNotification.get(item.id)!;
+          const visible = readerVisible(org, userId, cid, now);
+          expect(item.title !== null, `${org.slug} ${userId} ${cid}`).toBe(visible);
+          if (visible) titled += 1;
+          if (visible && org.documentNames && docIds(org).has(cid)) titledDocs += 1;
+        }
+      }
+    }
+    expect(titled).toBeGreaterThan(20);
+    expect(titledDocs).toBeGreaterThan(0);
+  });
+
+  it('platform_viewers_of_version: no viewer rows for a processing, failed or flag-off document; clips unchanged', async () => {
+    const [acme, globex] = fixture.orgs;
+    const viewers = async (org: FixtureOrg, contentId: string): Promise<number> => {
+      const v = await admin.query<{ id: string }>(
+        'SELECT current_version_id AS id FROM content WHERE org_id = $1 AND id = $2',
+        [org.orgId, contentId],
+      );
+      const versionId = v.rows[0]!.id;
+      await admin.query(
+        `INSERT INTO user_content_state (org_id, user_id, content_id, last_version_id, title_snapshot)
+         VALUES ($1, $2, $3, $4, 't') ON CONFLICT (org_id, user_id, content_id) DO UPDATE SET last_version_id = EXCLUDED.last_version_id`,
+        [org.orgId, fixture.users.member, contentId, versionId],
+      );
+      const r = await admin.query('SELECT user_id FROM platform_viewers_of_version($1, $2)', [
+        org.orgId,
+        versionId,
+      ]);
+      return r.rowCount ?? 0;
+    };
+    expect(await viewers(acme, acme.documentNames.docCompany!)).toBe(1);
+    expect(await viewers(acme, acme.documentNames.docProcessing!)).toBe(0);
+    expect(await viewers(acme, acme.documentNames.docFailed!)).toBe(0);
+    expect(await viewers(globex, globex.documentNames.docCompany!)).toBe(0); // flag off in globex
+    expect(await viewers(acme, acme.contentNames.companyPublished)).toBe(1); // a clip is unaffected
   });
 
   it('RLS: the app role sees nothing without tenant context and nothing from another org', async () => {
