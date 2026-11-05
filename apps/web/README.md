@@ -53,7 +53,9 @@ installed Chrome when the bundled Chromium lacks H.264. Reports land in `playwri
 ## Routes
 
 `/` feed (default landing), `/sign-in`, `/sign-up`, `/magic?token=`, `/streams`, `/streams/[id]`,
-`/upload`, `/content/[id]`, `/content/[id]/publish`, `/notifications`.
+`/upload`, `/content/[id]`, `/content/[id]/publish`, `/notifications`; M2a documents: `/documents` (keyword
+search, `?q=`), `/documents/[id]` (viewer), `/streams/[id]/documents` (per-stream list) and `/settings`
+(organisation settings: the documents switch, owner or admin only).
 
 ## Routes the web app expects from the API
 
@@ -92,3 +94,34 @@ version's progress. The web app waits until `currentVersion.id` equals the versi
 the current version from the start, for a replacement the switch happens once it is processed
 (ADR-0003). Media URLs in `FeedItem.media` must be relative `/media/...` paths; anything else is
 refused by the player.
+
+## Documents UI (M2a)
+
+Documents are content with `kind: 'document'` and reuse the clip lifecycle pages; what differs:
+
+- **Upload.** `/upload` accepts media and documents in one picker. `src/lib/documents.ts` mirrors the API
+  allow-list (PDF, DOCX, PPTX, XLSX, CSV, Markdown; legacy `.doc`/`.ppt`/`.xls` get their own message; 100 MiB)
+  and blocks a bad file before any request, with the same single-flight, presign and Uppy path as clips.
+  The API stays the authority: `feature_disabled`, `unsupported_file_type`, `file_too_large`, `quota_exceeded`
+  and `rate_limited` map to clear messages in `src/lib/errors.ts`. A failed version (for example `no_text`)
+  is shown to its authors with the reason on the content page.
+- **Publish.** The publish and content pages state that the document was **not scanned for personal data or
+  secrets** (AC-9, `scanStatus: not_run`). Documents never appear in the feed.
+- **Viewer** `/documents/[id]`. Sections come from the API grouped by anchor (page, slide, sheet rows or
+  heading) and are rendered as text nodes only (no `dangerouslySetInnerHTML`, never the original's markup);
+  more text loads by cursor. The original is only the attachment link
+  `/api/v1/content/{id}/document/original`. Every document the caller may not open (hidden, missing, flag off)
+  is the API's neutral 404, shown as the same not-found page as a missing clip.
+- **List and search.** `/streams/[id]/documents` lists published, live documents of a stream. `/documents?q=`
+  is a plain GET form: `q` lives only in the URL, is validated (not blank, 2,000 characters at most) before any
+  request, and snippets render the API's UTF-16 ranges as `<mark>` text (`snippetParts`). A 429 shows a
+  retry message.
+- **Flag.** `/settings` (owner or admin) switches `documentsEnabled`. With it off the upload picker refuses
+  document files and the list, search and viewer show an explanation (or the neutral 404). The deployment
+  kill switch is not visible to the web app: it surfaces as `feature_disabled` on the action, and turning
+  documents on during a rollback window is explained instead of applied.
+
+Mock e2e (`test/e2e/documents*.spec.ts`) runs without a database: the mock API (`test/mock-api`) implements the
+document routes with a deterministic stand-in for the parser (a `NOTEXT` marker fails a parse with `no_text`)
+plus knobs `POST /__mock/kill-switch {on}`, `/__mock/quota {exceeded}` and `/__mock/fail-next {match,status,code}`.
+Fixtures are regenerated with `python3 test/fixtures/make-documents.py`.

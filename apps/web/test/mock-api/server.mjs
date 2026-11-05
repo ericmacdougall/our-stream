@@ -8,6 +8,16 @@ import { createReadStream, existsSync, statSync } from 'node:fs';
 import { extname, join, normalize } from 'node:path';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { prepareFixtures } from './fixtures.mjs';
+import {
+  DOCUMENT_MAX_BYTES,
+  canonicalType,
+  checkUpload,
+  formatOfName,
+  mockParse,
+  rangesFor,
+  sectionize,
+  tokens,
+} from './documents.mjs';
 
 const PORT = Number(process.env['PORT'] ?? 4100);
 const HOST = process.env['HOST'] ?? '127.0.0.1';
@@ -28,9 +38,22 @@ const db = {
   uploads: new Map(), // uploadId -> { versionId, contentId, parts: Map }
   views: new Map(), // `${userId}:${contentId}` -> { versionId, completed }
   notifications: new Map(), // userId -> Notification[]
+  chunks: new Map(), // versionId -> [{ ordinal, anchor, text }] (documents)
 };
+// M2a test knobs: the deployment kill switch, one-shot failures for a route, a per-user search budget.
+const knobs = {
+  killSwitch: false,
+  quotaExceeded: false,
+  failNext: [],
+  searchHits: new Map(),
+  searchCalls: 0,
+};
+const DOCS_DEFAULT = (process.env['MOCK_DOCUMENTS_DEFAULT'] ?? 'true') === 'true';
+const SEARCH_BUDGET_PER_MINUTE = 60;
 
 const now = () => new Date().toISOString();
+/** Returned by a handler that already wrote the whole response itself. */
+const HANDLED = Symbol('handled');
 const log = (...a) => console.error('[mock-api]', ...a);
 
 class HttpError extends Error {
@@ -181,7 +204,31 @@ function contentDetail(c, user) {
     audience: c.audience,
     canEdit: c.ownerId === user.id || user.role === 'owner' || user.role === 'admin',
     contentEpoch: c.contentEpoch,
+    ...documentBlock(c),
   };
+}
+
+function documentBlock(c) {
+  const v = db.versions.get(c.currentVersionId);
+  if (c.kind !== 'document' || !v?.fileName) return {};
+  return {
+    document: {
+      format: formatOfName(v.fileName),
+      fileName: v.fileName,
+      mimeType: v.mimeType,
+      size: v.size,
+      scanStatus: 'not_run',
+    },
+  };
+}
+
+function documentsOn(orgId) {
+  return !knobs.killSwitch && db.orgs.get(orgId)?.documentsEnabled === true;
+}
+
+/** The reader gate for documents: published, live, current version, flag on, kill switch off. */
+function documentReadable(c, user) {
+  return Boolean(c) && c.kind === 'document' && documentsOn(user.orgId) && isVisible(c, user);
 }
 
 function isVisible(c, user) {
@@ -279,6 +326,41 @@ function startProcessing(version) {
   setTimeout(tick, PROCESSING_STEP_MS);
 }
 
+function startDocumentProcessing(version) {
+  const steps = ['parse', 'index'];
+  version.status = 'processing';
+  let i = 0;
+  const tick = () => {
+    if (version.status !== 'processing') return;
+    if (i < steps.length) {
+      version.processingStep = steps[i];
+      i += 1;
+      setTimeout(tick, PROCESSING_STEP_MS);
+      return;
+    }
+    version.processingStep = null;
+    const chunks = mockParse(formatOfName(version.fileName), version.bytes, version.fileName);
+    if (chunks.length === 0) {
+      version.status = 'failed';
+      version.processingError = 'no_text';
+      return;
+    }
+    db.chunks.set(
+      version.id,
+      chunks.map((c, ordinal) => ({ ordinal, ...c })),
+    );
+    version.status = 'current';
+    const content = db.content.get(version.contentId);
+    if (content) {
+      const previous = db.versions.get(content.currentVersionId);
+      if (previous && previous.id !== version.id) previous.status = 'superseded';
+      content.currentVersionId = version.id;
+      bumpContentEpoch(content);
+    }
+  };
+  setTimeout(tick, PROCESSING_STEP_MS);
+}
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SLUG_RE = /^[a-z0-9][a-z0-9-]*[a-z0-9]$/;
 const str = (v, min = 0, max = Infinity) =>
@@ -310,7 +392,13 @@ route('POST', '/v1/auth/signup', async ({ body, res }) => {
     throw new HttpError(409, 'email_taken');
   if ([...db.orgs.values()].some((o) => o.slug === body.orgSlug))
     throw new HttpError(409, 'slug_taken');
-  const org = { id: randomUUID(), slug: body.orgSlug, name: body.orgName, contentEpoch: 1 };
+  const org = {
+    id: randomUUID(),
+    slug: body.orgSlug,
+    name: body.orgName,
+    contentEpoch: 1,
+    documentsEnabled: DOCS_DEFAULT,
+  };
   db.orgs.set(org.id, org);
   const user = {
     id: randomUUID(),
@@ -485,7 +573,9 @@ function parseChapters(chapters) {
   });
 }
 route('POST', '/v1/content', async ({ auth, body }) => {
-  validate(['clip', 'audio'].includes(body.kind), 'kind');
+  validate(['clip', 'audio', 'document'].includes(body.kind), 'kind');
+  if (body.kind === 'document' && !documentsOn(auth.user.orgId))
+    throw new HttpError(403, 'feature_disabled', 'documents are not enabled for this organisation');
   validate(str(body.title, 1, 200), 'title');
   const c = {
     id: randomUUID(),
@@ -534,10 +624,28 @@ route('POST', '/v1/content/:id/upload/init', async ({ auth, params, body }) => {
   const c = contentOrThrow(params.id, auth.user, { edit: true });
   if (c.retractedAt) throw new HttpError(409, 'conflict', 'retracted');
   validate(str(body.fileName, 1, 255), 'fileName');
-  validate(
-    typeof body.mimeType === 'string' && /^(video|audio)\/[a-z0-9.+-]+$/i.test(body.mimeType),
-    'mimeType',
-  );
+  let docUpload = null;
+  if (c.kind === 'document') {
+    if (!documentsOn(auth.user.orgId))
+      throw new HttpError(
+        403,
+        'feature_disabled',
+        'documents are not enabled for this organisation',
+      );
+    validate(typeof body.mimeType === 'string', 'mimeType');
+    const verdict = checkUpload(body.fileName, body.mimeType);
+    if (!verdict.ok) throw new HttpError(400, 'unsupported_file_type', verdict.message);
+    validate(Number.isInteger(body.size) && body.size > 0, 'size');
+    if (body.size > DOCUMENT_MAX_BYTES)
+      throw new HttpError(413, 'file_too_large', 'documents can be at most 100 MiB');
+    if (knobs.quotaExceeded) throw new HttpError(429, 'quota_exceeded', 'document storage is full');
+    docUpload = verdict;
+  } else {
+    validate(
+      typeof body.mimeType === 'string' && /^(video|audio)\/[a-z0-9.+-]+$/i.test(body.mimeType),
+      'mimeType',
+    );
+  }
   validate(Number.isInteger(body.size) && body.size > 0 && body.size <= 4 * 1024 ** 3, 'size');
   validate(Number.isInteger(body.parts) && body.parts >= 1 && body.parts <= 10000, 'parts');
   const v = {
@@ -552,6 +660,7 @@ route('POST', '/v1/content/:id/upload/init', async ({ auth, params, body }) => {
     hasCaptions: false,
     size: body.size,
     parts: body.parts,
+    ...(docUpload ? { fileName: docUpload.fileName, mimeType: body.mimeType } : {}),
   };
   db.versions.set(v.id, v);
   // A draft's first upload is its current version from the start, so clients can poll its
@@ -564,6 +673,7 @@ route('POST', '/v1/content/:id/upload/init', async ({ auth, params, body }) => {
     contentId: c.id,
     parts: new Map(),
     expected: body.parts,
+    keepBytes: Boolean(docUpload),
   });
   const key = `orgs/${c.orgId}/content/${c.id}/versions/${v.id}/original/${randomUUID()}`;
   return {
@@ -593,7 +703,20 @@ route('POST', '/v1/content/:id/upload/complete', async ({ auth, params, body }) 
   }
   validate(body.parts.length === upload.expected, 'all parts required');
   db.uploads.delete(body.uploadId);
-  startProcessing(v);
+  if (c.kind === 'document') {
+    if (!documentsOn(auth.user.orgId))
+      throw new HttpError(
+        403,
+        'feature_disabled',
+        'documents are not enabled for this organisation',
+      );
+    v.bytes = Buffer.concat(
+      [...upload.parts.entries()]
+        .sort((a, b) => a[0] - b[0])
+        .map(([, part]) => part.buf ?? Buffer.alloc(0)),
+    );
+    startDocumentProcessing(v);
+  } else startProcessing(v);
   return contentDetail(c, auth.user);
 });
 route('POST', '/v1/content/:id/publish', async ({ auth, params, body }) => {
@@ -616,6 +739,8 @@ route('POST', '/v1/content/:id/publish', async ({ auth, params, body }) => {
   validate(publishAt === null || !Number.isNaN(Date.parse(publishAt)), 'publishAt');
   validate(expiresAt === null || !Number.isNaN(Date.parse(expiresAt)), 'expiresAt');
   const wasPublished = c.state === 'published';
+  if (c.kind === 'document' && !wasPublished && !documentsOn(auth.user.orgId))
+    throw new HttpError(403, 'feature_disabled', 'documents are not enabled for this organisation');
   c.audience = body.audience;
   c.publishAt = publishAt ?? (wasPublished ? c.publishAt : now());
   c.expiresAt = expiresAt;
@@ -681,7 +806,7 @@ route('GET', '/v1/feed', async ({ auth, url }) => {
     offset = parsed;
   }
   const visible = [...db.content.values()]
-    .filter((c) => isVisible(c, auth.user))
+    .filter((c) => c.kind !== 'document' && isVisible(c, auth.user))
     .filter(
       (c) => !streamId || c.audience.some((a) => a.type === 'stream' && a.streamId === streamId),
     )
@@ -694,6 +819,189 @@ route('GET', '/v1/feed', async ({ auth, url }) => {
       nextOffset < visible.length ? Buffer.from(String(nextOffset)).toString('base64url') : null,
     authzEpoch: auth.user.authzEpoch,
     orgContentEpoch: orgOf(auth.user).contentEpoch,
+  };
+});
+
+// org settings (M2a: the documents flag)
+const orgSettings = (org) => ({
+  privacyMode: 'aggregate_only',
+  commentsEnabled: true,
+  engagementRetentionDays: 395,
+  commentScanPolicy: 'off',
+  documentsEnabled: org.documentsEnabled === true,
+});
+route('GET', '/v1/org/settings', async ({ auth }) => orgSettings(orgOf(auth.user)));
+route('PATCH', '/v1/org/settings', async ({ auth, body }) => {
+  if (auth.user.role !== 'owner' && auth.user.role !== 'admin')
+    throw new HttpError(403, 'forbidden');
+  const org = orgOf(auth.user);
+  if (body.documentsEnabled !== undefined) {
+    validate(typeof body.documentsEnabled === 'boolean', 'documentsEnabled');
+    if (body.documentsEnabled && knobs.killSwitch)
+      throw new HttpError(
+        403,
+        'feature_disabled',
+        'documents are disabled for the whole deployment',
+      );
+    org.documentsEnabled = body.documentsEnabled;
+  }
+  return orgSettings(org);
+});
+
+// documents (M2a): viewer, original download, per-stream list, keyword search
+const NEUTRAL_404 = JSON.stringify({ error: { code: 'not_found', message: 'not found' } });
+function neutralNotFound(res) {
+  res.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
+  res.end(NEUTRAL_404);
+}
+function pageOf(url, max = 500, dflt = 200) {
+  const limit = Math.min(max, Math.max(1, Number(url.searchParams.get('limit') ?? dflt) || dflt));
+  const cursor = url.searchParams.get('cursor');
+  let offset = 0;
+  if (cursor) {
+    offset = Number(cursor);
+    validate(Number.isInteger(offset) && offset >= 0, 'cursor');
+  }
+  return { limit, offset };
+}
+const docInfo = (v) => ({
+  format: formatOfName(v.fileName),
+  fileName: v.fileName,
+  mimeType: v.mimeType,
+  size: v.size,
+  scanStatus: 'not_run',
+});
+route('GET', '/v1/content/:id/document', async ({ auth, params, url, res }) => {
+  const c = db.content.get(params.id);
+  if (!c || !documentReadable(c, auth.user)) return neutralNotFound(res);
+  const v = db.versions.get(c.currentVersionId);
+  const all = db.chunks.get(v.id) ?? [];
+  const limit = Math.min(500, Math.max(1, Number(url.searchParams.get('limit') ?? 200) || 200));
+  const cursor = url.searchParams.get('cursor');
+  const after = cursor === null ? -1 : Number(cursor);
+  validate(Number.isInteger(after), 'cursor');
+  const page = all.filter((x) => x.ordinal > after).slice(0, limit);
+  const last = page[page.length - 1];
+  const more = last && all.some((x) => x.ordinal > last.ordinal);
+  return {
+    id: c.id,
+    versionId: v.id,
+    title: c.title,
+    document: docInfo(v),
+    downloadPath: `/v1/content/${c.id}/document/original`,
+    sections: sectionize(page),
+    nextCursor: more ? String(last.ordinal) : null,
+  };
+});
+route('GET', '/v1/content/:id/document/original', async ({ auth, params, res }) => {
+  const c = db.content.get(params.id);
+  if (!c || !documentReadable(c, auth.user)) return neutralNotFound(res);
+  const v = db.versions.get(c.currentVersionId);
+  const ascii = v.fileName.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
+  res.writeHead(200, {
+    'content-type': canonicalType(formatOfName(v.fileName)),
+    'content-length': v.bytes.length,
+    'content-disposition': `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(v.fileName)}`,
+    'x-content-type-options': 'nosniff',
+    'content-security-policy': "sandbox; default-src 'none'",
+    'cross-origin-resource-policy': 'same-origin',
+    'x-frame-options': 'DENY',
+    'cache-control': 'private, no-store',
+  });
+  res.end(v.bytes);
+  return HANDLED;
+});
+route('GET', '/v1/streams/:id/documents', async ({ auth, params, url }) => {
+  const s = db.streams.get(params.id);
+  if (!s || s.orgId !== auth.user.orgId || (s.kind === 'private' && !streamRoleFor(s, auth.user)))
+    throw new HttpError(404, 'stream_not_found');
+  const { limit, offset } = pageOf(url, 100, 20);
+  const docs = [...db.content.values()]
+    .filter((c) => documentReadable(c, auth.user))
+    .filter((c) => c.audience.some((a) => a.type === 'stream' && a.streamId === s.id))
+    .sort((a, b) => Date.parse(b.publishAt) - Date.parse(a.publishAt));
+  const items = docs.slice(offset, offset + limit).map((c) => {
+    const v = db.versions.get(c.currentVersionId);
+    return {
+      id: c.id,
+      title: c.title,
+      description: c.description,
+      publishAt: c.publishAt,
+      owner: { id: c.ownerId, displayName: db.users.get(c.ownerId)?.displayName ?? '' },
+      versionId: v.id,
+      document: docInfo(v),
+      tags: [],
+    };
+  });
+  return { items, nextCursor: offset + limit < docs.length ? String(offset + limit) : null };
+});
+route('GET', '/v1/search/documents', async ({ auth, url }) => {
+  const q = url.searchParams.get('q');
+  knobs.searchCalls += 1;
+  validate(q !== null && q.length <= 2000, 'q');
+  // One budget per user and minute, shared with retrieval in the real API (429 `rate_limited`).
+  const minute = Math.floor(Date.now() / 60000);
+  const hits = knobs.searchHits.get(auth.user.id);
+  const used = hits?.minute === minute ? hits.count + 1 : 1;
+  knobs.searchHits.set(auth.user.id, { minute, count: used });
+  if (used > SEARCH_BUDGET_PER_MINUTE)
+    throw new HttpError(429, 'rate_limited', 'too many requests');
+  const toks = tokens(q);
+  const { limit, offset } = pageOf(url, 50, 20);
+  const streamId = url.searchParams.get('streamId');
+  const base = { authzEpoch: auth.user.authzEpoch, orgContentEpoch: orgOf(auth.user).contentEpoch };
+  if (toks.length === 0) return { items: [], total: 0, nextCursor: null, ...base };
+  const scored = [];
+  for (const c of db.content.values()) {
+    if (!documentReadable(c, auth.user)) continue;
+    if (streamId && !c.audience.some((a) => a.type === 'stream' && a.streamId === streamId))
+      continue;
+    const v = db.versions.get(c.currentVersionId);
+    const snippets = [];
+    const titleRanges = rangesFor(c.title, toks);
+    if (titleRanges.length)
+      snippets.push({ source: 'title', text: c.title, ranges: titleRanges, anchor: null });
+    const descRanges = rangesFor(c.description, toks);
+    if (descRanges.length)
+      snippets.push({
+        source: 'description',
+        text: c.description,
+        ranges: descRanges,
+        anchor: null,
+      });
+    for (const chunk of db.chunks.get(v.id) ?? []) {
+      const ranges = rangesFor(chunk.text, toks);
+      if (ranges.length && snippets.filter((x) => x.source === 'text').length < 2)
+        snippets.push({ source: 'text', text: chunk.text, ranges, anchor: chunk.anchor });
+    }
+    if (snippets.length === 0) continue;
+    scored.push({ c, v, snippets, score: Math.min(1, snippets.length / 3) });
+  }
+  scored.sort((a, b) => b.score - a.score || Date.parse(b.c.publishAt) - Date.parse(a.c.publishAt));
+  const items = scored.slice(offset, offset + limit).map(({ c, v, snippets, score }) => ({
+    id: c.id,
+    kind: 'document',
+    title: c.title,
+    description: c.description,
+    publishAt: c.publishAt,
+    owner: { id: c.ownerId, displayName: db.users.get(c.ownerId)?.displayName ?? '' },
+    versionId: v.id,
+    document: docInfo(v),
+    streams: c.audience
+      .filter((a) => a.type === 'stream' && db.streams.has(a.streamId))
+      .map((a) => {
+        const st = db.streams.get(a.streamId);
+        return { id: st.id, name: st.name, kind: st.kind };
+      }),
+    tags: [],
+    snippets,
+    score,
+  }));
+  return {
+    items,
+    total: Math.min(1000, scored.length),
+    nextCursor: offset + limit < scored.length ? String(offset + limit) : null,
+    ...base,
   };
 });
 
@@ -713,6 +1021,29 @@ route('POST', '/v1/notifications/:id/read', async ({ auth, params }) => {
 // test hooks (mock only)
 route('POST', '/__mock/reset', async () => {
   for (const m of Object.values(db)) m.clear();
+  knobs.killSwitch = false;
+  knobs.quotaExceeded = false;
+  knobs.failNext = [];
+  knobs.searchHits.clear();
+  knobs.searchCalls = 0;
+  return { ok: true };
+});
+route('POST', '/__mock/kill-switch', async ({ body }) => {
+  knobs.killSwitch = body.on === true;
+  return { ok: true, killSwitch: knobs.killSwitch };
+});
+route('POST', '/__mock/quota', async ({ body }) => {
+  knobs.quotaExceeded = body.exceeded === true;
+  return { ok: true };
+});
+// One-shot failure for the next `count` requests whose "METHOD path" matches `match` (a regex source).
+route('POST', '/__mock/fail-next', async ({ body }) => {
+  knobs.failNext.push({
+    re: new RegExp(String(body.match)),
+    status: Number(body.status ?? 500),
+    code: String(body.code ?? 'internal'),
+    count: Number(body.count ?? 1),
+  });
   return { ok: true };
 });
 route('GET', '/__mock/state', async () => ({
@@ -720,6 +1051,7 @@ route('GET', '/__mock/state', async () => ({
   content: db.content.size,
   sessions: db.sessions.size,
   media: media.mode,
+  searchCalls: knobs.searchCalls,
 }));
 
 const PUBLIC = new Set([
@@ -730,6 +1062,9 @@ const PUBLIC = new Set([
   '/v1/auth/logout',
   '/__mock/reset',
   '/__mock/state',
+  '/__mock/kill-switch',
+  '/__mock/quota',
+  '/__mock/fail-next',
   '/health',
   '/v1/meta',
 ]);
@@ -799,7 +1134,11 @@ async function handleUploadPart(req, res, url) {
   if (!upload) throw new HttpError(404, 'not_found');
   const body = await readBody(req);
   const etag = randomBytes(8).toString('hex');
-  upload.parts.set(Number(m[2]), { etag, bytes: body.length });
+  upload.parts.set(Number(m[2]), {
+    etag,
+    bytes: body.length,
+    ...(upload.keepBytes ? { buf: body } : {}),
+  });
   res.writeHead(200, {
     etag: `"${etag}"`,
     'access-control-allow-origin': '*',
@@ -855,7 +1194,15 @@ const server = createServer(async (req, res) => {
         auth = authenticate(req);
         if (req.method !== 'GET') requireCsrf(req, auth.session);
       }
+      const forced = knobs.failNext.find(
+        (f) => f.count > 0 && f.re.test(`${req.method} ${url.pathname}`),
+      );
+      if (forced && !url.pathname.startsWith('/__mock/')) {
+        forced.count -= 1;
+        throw new HttpError(forced.status, forced.code, forced.code);
+      }
       const result = await r.handler({ req, res, url, params, body, auth });
+      if (result === HANDLED || res.writableEnded) return;
       return sendJson(res, 200, result);
     }
     throw new HttpError(404, 'not_found', `no route ${req.method} ${url.pathname}`);

@@ -56,6 +56,9 @@ pnpm --filter @our-stream/web test:e2e                                      # Pl
 E2E_API_URL=http://localhost:4000 pnpm --filter @our-stream/web test:e2e    # same suite against a real stack
 ```
 
+The M2a document specs (`documents*.spec.ts`) are mock-only (they skip when `E2E_API_URL` is set): a real
+parse needs the worker and a database. The documents UI is described in `apps/web/README.md`.
+
 ## Mobile app (apps/mobile)
 
 The Expo app (Apache-2.0) only ever calls the API through `@our-stream/contracts`; `docs/mobile.md`

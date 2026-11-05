@@ -70,7 +70,7 @@ export async function uploadClip(page: Page, title: string, options: { chapter?:
     await page.getByLabel('Chapter 1 time').fill('00:02');
     await page.getByLabel('Chapter 1 title').fill('Second chapter');
   }
-  await page.getByLabel('Video or audio file').setInputFiles(FIXTURE_MP4);
+  await page.getByLabel('Video, audio or document file').setInputFiles(FIXTURE_MP4);
   await page.getByRole('button', { name: 'Create and upload' }).click();
   const status = page.getByTestId('processing-status');
   await expect(status).toHaveAttribute('data-status', 'current', { timeout: 90_000 });
@@ -91,4 +91,60 @@ export async function publishToEveryone(page: Page, contentId: string) {
 
 export function feedItem(page: Page, contentId: string) {
   return page.locator(`[data-testid="feed-item"][data-content-id="${contentId}"]`);
+}
+
+// ---- documents (M2a) ----
+export const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures');
+export const fixturePath = (name: string) => join(FIXTURES, name);
+export const MOCK_URL = `http://127.0.0.1:${process.env['E2E_MOCK_PORT'] ?? 4100}`;
+
+export type UploadSource = string | { name: string; mimeType: string; buffer: Buffer };
+
+export async function streamIdFor(page: Page, name: string): Promise<string> {
+  await page.goto('/streams');
+  const href = await page
+    .getByTestId('streams-list')
+    .getByRole('link', { name, exact: true })
+    .getAttribute('href');
+  const id = /\/streams\/([^/]+)$/.exec(href ?? '')?.[1];
+  if (!id) throw new Error(`could not read stream id from ${href}`);
+  return id;
+}
+
+/** Uploads a document through /upload and waits for a terminal processing state; returns the id. */
+export async function uploadDocument(
+  page: Page,
+  title: string,
+  source: UploadSource,
+  expected: 'current' | 'failed' = 'current',
+): Promise<string> {
+  await page.goto('/upload');
+  await page.getByLabel('Title').fill(title);
+  await page
+    .getByLabel('Video, audio or document file')
+    .setInputFiles(typeof source === 'string' ? fixturePath(source) : source);
+  await page.getByRole('button', { name: 'Create and upload' }).click();
+  await expect(page.getByTestId('processing-status')).toHaveAttribute('data-status', expected, {
+    timeout: 90_000,
+  });
+  const href = await page.getByRole('link', { name: 'View document' }).getAttribute('href');
+  const id = /\/content\/([^/]+)$/.exec(href ?? '')?.[1];
+  if (!id) throw new Error(`could not read content id from ${href}`);
+  return id;
+}
+
+export async function publishToStream(page: Page, contentId: string, streamName: string) {
+  await page.goto(`/content/${contentId}/publish`);
+  await page.getByLabel(streamName, { exact: true }).check();
+  await page.getByRole('button', { name: 'Publish', exact: true }).click();
+  await page.waitForURL((u) => u.pathname === `/content/${contentId}`);
+}
+
+export async function mock(path: string, body?: unknown) {
+  const res = await fetch(`${MOCK_URL}${path}`, {
+    method: body === undefined ? 'GET' : 'POST',
+    headers: { 'content-type': 'application/json' },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+  return (await res.json()) as Record<string, unknown>;
 }
