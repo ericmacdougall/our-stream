@@ -13,12 +13,13 @@ src/app/              Expo Router screens
   index.tsx           redirect by session state
   sign-in.tsx         email → server discovery/confirm → password or magic link
   server.tsx          manual server address (Q5 fallback)
-  magic.tsx           magic-link landing (explicit "Sign in" before the token is used)
+  magic.tsx           magic-link landing: consumes only a link this device requested (verifier), on "Sign in"
   (tabs)/             feed, search, notifications
   content/[id]/       detail with player, like, comments; share.tsx picks a recipient
 src/components/       Player (expo-video + media token + engagement), FeedCard, CommentThread, Snippet, Button, Notice
 src/lib/              pure modules with vitest tests: discovery, server, session, api, media, engagement,
-                      snippets, comments, feed, magic, errors; storage adapters; session context
+                      snippets, comments, feed, magic, magic-verifier, magic-consume, startup, errors; storage adapters;
+                      session context
 src/i18n.ts           string table (en)
 ```
 

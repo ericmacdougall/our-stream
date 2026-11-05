@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Magic-link landing. The token waits in the deep-link memory slot; it is consumed only against the
-// last confirmed server and only when the user taps "Sign in" (no drive-by consumption).
+// Magic-link landing. The link waits in the deep-link memory slot; it is consumed only when this
+// device started the request (secure-store verifier) and the link names that request's server, and
+// only when the user taps "Sign in" (no drive-by consumption). Decisions live in lib/magic-consume.ts.
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
@@ -12,103 +13,122 @@ import {
   discardMagicLink,
   hasPendingMagicLink,
   offerMagicLink,
-  takeMagicToken,
+  restoreMagicLink,
+  takeMagicLink,
 } from '../lib/deeplink';
 import type { ServerConfig } from '../lib/discovery';
 import { errorMessage } from '../lib/errors';
+import { consumeMagicLink, resolveSwitch, type ConsumeOutcome } from '../lib/magic-consume';
+import { loadMagicVerifier } from '../lib/magic-verifier';
 import { ALLOW_LOOPBACK_HTTP } from '../lib/runtime';
-import { loadLastServer } from '../lib/session';
 import { useSession, type Me } from '../lib/session-context';
 import { secureStore } from '../lib/storage';
 import { base } from '../lib/theme';
 
+type Incoming = Extract<ConsumeOutcome<Me>, { kind: 'confirmSwitch' }>;
+
 export default function MagicScreen() {
   const router = useRouter();
   const session = useSession();
-  const params = useLocalSearchParams<{ token?: string }>();
+  const params = useLocalSearchParams<{ token?: string; server?: string }>();
+  /** The server this device's request went to; null when no request is pending on this device. */
   const [server, setServer] = useState<ServerConfig | null | undefined>(undefined);
   const [pending, setPending] = useState(hasPendingMagicLink());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /** A consumed link for another account while a session exists: the user decides which to keep. */
-  const [incoming, setIncoming] = useState<{ secret: string; me: Me } | null>(null);
+  const [incoming, setIncoming] = useState<Incoming | null>(null);
 
   useEffect(() => {
-    // Expo Router parses deep links itself; move a token it captured into the memory slot and strip
-    // it from the navigation state.
+    // Expo Router parses deep links itself; move what it captured into the memory slot and strip it
+    // from the navigation state.
     if (params.token) {
-      const accepted = offerMagicLink(
-        `ourstream://magic?token=${encodeURIComponent(params.token)}`,
-      );
+      const url =
+        `ourstream://magic?token=${encodeURIComponent(params.token)}` +
+        (params.server ? `&server=${encodeURIComponent(params.server)}` : '');
+      const accepted = offerMagicLink(url);
       setPending(accepted || hasPendingMagicLink());
-      router.setParams({ token: undefined });
+      router.setParams({ token: undefined, server: undefined });
     }
-  }, [params.token, router]);
+  }, [params.token, params.server, router]);
 
   useEffect(() => {
-    void loadLastServer(secureStore, { allowLoopbackHttp: ALLOW_LOOPBACK_HTTP }).then(setServer);
+    void loadMagicVerifier(secureStore, { allowLoopbackHttp: ALLOW_LOOPBACK_HTTP }).then((v) =>
+      setServer(v ? v.server : null),
+    );
   }, []);
 
   const consume = async () => {
-    if (!server) return;
-    const token = takeMagicToken();
-    if (!token) {
+    const link = takeMagicLink();
+    if (!link) {
       setPending(false);
       return;
     }
     setBusy(true);
     setError(null);
     try {
-      // Validate the link first; an invalid or crafted link must not touch the current session.
-      const api = createApi({ apiUrl: server.apiUrl });
-      const result = await api.POST('/v1/auth/magic-link/consume', { body: { token } });
-      const message = errorMessage(result);
-      if (message || !result.data) {
-        setError(message ?? strings.errors.generic);
-        setPending(false);
-        return;
+      const outcome = await consumeMagicLink<Me>(link, {
+        store: secureStore,
+        allowLoopbackHttp: ALLOW_LOOPBACK_HTTP,
+        currentUserId: session.state.status === 'signedIn' ? session.state.me.user.id : null,
+        consume: async (target, token, verifier) => {
+          try {
+            const api = createApi({ apiUrl: target.apiUrl });
+            const result = await api.POST('/v1/auth/magic-link/consume', {
+              body: { token, verifier },
+            });
+            const message = errorMessage(result);
+            if (message || !result.data) return { kind: 'refused' };
+            const { secret, me } = splitSignIn(result.data as Me & { sessionToken?: string });
+            return secret ? { kind: 'ok', secret, me: me as Me } : { kind: 'refused' };
+          } catch {
+            return { kind: 'network' };
+          }
+        },
+      });
+      switch (outcome.kind) {
+        case 'blocked':
+          setError(strings.magic.notStarted);
+          setPending(false);
+          return;
+        case 'refused':
+          setError(strings.errors.invalidLink);
+          setPending(false);
+          return;
+        case 'network':
+          // Never reached the server: keep the link so the user can retry within the TTL.
+          restoreMagicLink(link);
+          setPending(true);
+          setError(strings.errors.offline);
+          return;
+        case 'confirmSwitch':
+          setIncoming(outcome);
+          return;
+        case 'signedIn':
+          if (outcome.replacesSession && session.state.status === 'signedIn')
+            await logoutBestEffort(session.state.api);
+          await session.signIn(outcome.server, outcome.secret, outcome.me);
+          router.replace('/(tabs)/feed');
+          return;
       }
-      const { secret, me } = splitSignIn(result.data as Me & { sessionToken?: string });
-      if (!secret) {
-        setError(strings.errors.generic);
-        setPending(false);
-        return;
-      }
-      if (session.state.status === 'signedIn' && session.state.me.user.id !== me.user.id) {
-        // The link is valid for another account: show it and ask before replacing the session.
-        setIncoming({ secret, me });
-        return;
-      }
-      if (session.state.status === 'signedIn') await logoutBestEffort(session.state.api);
-      await session.signIn(server, secret, me);
-      router.replace('/(tabs)/feed');
-    } catch {
-      setError(strings.errors.offline);
-      setPending(false);
     } finally {
       setBusy(false);
     }
   };
 
-  const switchAccount = async () => {
-    if (!server || !incoming) return;
+  const choose = async (choice: 'switch' | 'keep') => {
+    if (!incoming) return;
     setBusy(true);
     try {
-      if (session.state.status === 'signedIn') await logoutBestEffort(session.state.api);
-      await session.signIn(server, incoming.secret, incoming.me);
-      setIncoming(null);
-      router.replace('/(tabs)/feed');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const keepSession = async () => {
-    if (!server || !incoming) return;
-    setBusy(true);
-    try {
-      // Revoke the session the link created so the unused secret does not stay valid server-side.
-      await logoutBestEffort(createApi({ apiUrl: server.apiUrl, secret: incoming.secret }));
+      await resolveSwitch(choice, incoming, {
+        logoutCurrent: async () => {
+          if (session.state.status === 'signedIn') await logoutBestEffort(session.state.api);
+        },
+        signIn: (target, secret, me) => session.signIn(target, secret, me),
+        // Revoke the session the link created so the unused secret does not stay valid server-side.
+        revokeIncoming: (target, secret) =>
+          logoutBestEffort(createApi({ apiUrl: target.apiUrl, secret })),
+      });
       setIncoming(null);
       router.replace('/(tabs)/feed');
     } finally {
@@ -127,7 +147,7 @@ export default function MagicScreen() {
         {strings.magic.title}
       </Text>
       <Notice text={error} kind="error" />
-      {server === null && <Notice text={strings.magic.needServer} />}
+      {server === null && !error && <Notice text={strings.magic.notStarted} kind="error" />}
       {server && !pending && !error && <Notice text={strings.magic.failed} kind="error" />}
       {incoming && session.state.status === 'signedIn' && (
         <View style={base.card}>
@@ -137,12 +157,12 @@ export default function MagicScreen() {
             <Button
               label={strings.magic.switchCancel}
               variant="secondary"
-              onPress={() => void keepSession()}
+              onPress={() => void choose('keep')}
               disabled={busy}
             />
             <Button
               label={strings.magic.switchConfirm}
-              onPress={() => void switchAccount()}
+              onPress={() => void choose('switch')}
               busy={busy}
             />
           </View>

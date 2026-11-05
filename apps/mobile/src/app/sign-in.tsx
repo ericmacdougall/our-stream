@@ -10,6 +10,8 @@ import { strings } from '../i18n';
 import { createApi, splitSignIn } from '../lib/api';
 import { discoverServer, emailDomain, hostRelation, type ServerConfig } from '../lib/discovery';
 import { errorMessage } from '../lib/errors';
+import { magicCrypto } from '../lib/magic-crypto';
+import { clearMagicVerifier, startMagicRequest } from '../lib/magic-verifier';
 import { ALLOW_LOOPBACK_HTTP } from '../lib/runtime';
 import { pinServer, pinnedServer, saveLastServer, unpinServer } from '../lib/session';
 import { useSession, type Me } from '../lib/session-context';
@@ -128,12 +130,19 @@ export default function SignInScreen() {
     setError(null);
     setBusy(true);
     try {
+      // Bind the emailed link to this device: only the digest of a fresh secret leaves it.
+      const { clientChallenge } = await startMagicRequest(secureStore, server, magicCrypto);
       const api = createApi({ apiUrl: server.apiUrl });
-      const result = await api.POST('/v1/auth/magic-link', { body: { email: email.trim() } });
+      const result = await api.POST('/v1/auth/magic-link', {
+        body: { email: email.trim(), clientChallenge },
+      });
       const message = errorMessage(result);
-      if (message) setError(message);
-      else setInfo(t.magicSent);
+      if (message) {
+        await clearMagicVerifier(secureStore);
+        setError(message);
+      } else setInfo(t.magicSent);
     } catch {
+      // The request may or may not have reached the server; a retry makes a new verifier anyway.
       setError(strings.errors.offline);
     } finally {
       setBusy(false);

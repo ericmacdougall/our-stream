@@ -50,16 +50,28 @@ then clears the stored session; a 401 anywhere, or 403 `not_member`, signs out l
 (`expo start --web`, used for development click tests only) keeps the session in `sessionStorage` in
 development and in memory otherwise, because SecureStore does not exist on web.
 
-Magic links: the API mails `${APP_BASE_URL}/magic?token=...`. The app handles that path as a universal
-link (once the deployment publishes `apple-app-site-association` / `assetlinks.json` for the web
-origin; until then the link opens in the web app, which consumes the token, so the mobile magic flow
-is inactive) and as `ourstream://magic?token=...`. The token is moved into a memory slot (a token the
-router parsed from the URL is moved there and stripped from the route parameters) and consumed
-against the last confirmed server only when the user taps "Sign in". The link is validated first; only
-a successful consume replaces an existing session (which is then revoked); when the link belongs to a
-different account than the current session, the app shows the incoming address and asks whether to
-switch (declining revokes the session the link created). A consumed token is remembered for the
-process so a replayed launch URL cannot resubmit it.
+Magic links (device-bound, no associated domains). The app requests a link with a `clientChallenge`:
+before asking, it makes a random 32-byte verifier (`expo-crypto`), keeps it in `expo-secure-store`
+(`WHEN_UNLOCKED_THIS_DEVICE_ONLY`) with the server the request goes to and a timestamp, and sends only
+`base64url(SHA-256(verifier))`. For such a request the API mails
+`${APP_BASE_URL}/magic?token=<T>&app=1`, an https page on the user's own server that does not consume the
+token and offers "Open in the our-stream app", a link to
+`ourstream://magic?token=<T>&server=<origin of that page>` (contract in `docs/api.md`). The app needs no
+`associatedDomains` or intent filters and works for any self-hosted server. When the app receives that
+link it moves the token into a memory slot (a token the router parsed is stripped from the route
+parameters) and, on "Sign in", consumes it only if (a) a stored verifier exists and is younger than the
+link lifetime (15 minutes, the API default `MAGIC_LINK_TTL_MINUTES`) and (b) the `server` origin equals
+the origin of that request's `webUrl`; otherwise it shows "This sign-in link was not started on this
+device or belongs to a different server" and sends nothing. The consume call carries the verifier, and
+the API consumes the link only when `SHA-256(verifier)` matches the stored challenge, so a link opened on
+another device, or a crafted one, cannot sign this app in and a failed attempt does not burn the link.
+The verifier is deleted after any attempt the server answered and kept only on network loss, so the same
+link can be retried within its lifetime. Requesting a new link replaces the verifier, so only the newest
+emailed link works. When the link belongs to a different account than the current session, the app shows
+the incoming address and asks whether to switch (declining revokes the session the link created). A
+consumed token is remembered for the process so a replayed launch URL cannot resubmit it. The decisions
+live in `src/lib/magic-consume.ts` and `magic-verifier.ts` and the startup flow in `startup.ts`, all unit
+tested.
 
 ## Playback and media tokens
 
@@ -97,7 +109,12 @@ Status and error texts are live regions. VoiceOver/TalkBack runs are a manual ch
   not by an observed device session. The web target proves request shapes and screen flows only.
 - `expo lint` has no configuration in `apps/mobile` yet; prettier, tsc, vitest and the SPDX/licence
   gates run.
-- A cold start while offline (or a 5xx from `GET /v1/me`) shows the sign-in screen instead of a retry.
+- A cold start while offline (or a 5xx from `GET /v1/me`) shows the sign-in screen with a notice instead
+  of a retry; any other 401/403 signs out locally with the session-ended notice.
+- Magic links expire in the app after 15 minutes (the API default); a server configured with a longer
+  `MAGIC_LINK_TTL_MINUTES` still gets links that the app refuses after 15 minutes. The handoff page is
+  built in the web app; until a web build that ships it is deployed, app-started links land on a page
+  that cannot open the app. Not yet exercised on a device (custom-scheme hand-off from a mail client).
 - Discovery's exact-URL check relies on React Native's `fetch` filling `response.url` (an empty value
   fails closed as "redirected", leaving only manual entry); unverified on a device.
 - A chunked discovery response without `content-length` is read in full before the 16 KiB check; only

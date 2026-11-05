@@ -65,7 +65,8 @@ export const strings = {
   },
   magic: {
     title: 'Signing you in…',
-    needServer: 'Choose your server first, then open the sign-in link again.',
+    notStarted:
+      'This sign-in link was not started on this device or belongs to a different server. Request a new link from the app.',
     replaces: (email: string) => `Signing in with this link will sign out ${email}.`,
     switchTitle: (email: string) => `This link signs in as ${email}.`,
     switchBody: (current: string) => `Continuing signs out ${current} on this device.`,
