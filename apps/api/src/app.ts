@@ -30,6 +30,7 @@ import { registerFeedRoutes } from './routes/feed.js';
 import { registerMediaRoutes } from './routes/media.js';
 import { registerOrgRoutes } from './routes/org.js';
 import { registerReactRoutes } from './routes/react.js';
+import { registerRetrievalRoutes, type RetrievalOptions } from './routes/retrieval.js';
 import { registerSearchRoutes } from './routes/search.js';
 import { registerSettingsRoutes } from './routes/settings.js';
 
@@ -48,6 +49,8 @@ export interface AppDeps {
   store?: ObjectStore;
   /** Test hook: receives every log line so suites can assert what never reaches the logs (R16). */
   logSink?: { write(line: string): void };
+  /** Retrieval service seams (embedder, clock, cache); production passes none (keyword-only until wired). */
+  retrieval?: RetrievalOptions;
 }
 
 /** Request serializer: search terms are personal data (ADR-0013 §6), so `q` never reaches the logs. */
@@ -248,6 +251,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   registerMediaRoutes(app, ctx);
   registerReactRoutes(app, ctx);
   registerSearchRoutes(app, ctx);
+  registerRetrievalRoutes(app, ctx, deps.retrieval);
   registerEngagementRoutes(app, ctx);
   registerSettingsRoutes(app, ctx);
 

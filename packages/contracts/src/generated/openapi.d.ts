@@ -2597,6 +2597,79 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/v1/retrieval/query': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody: {
+        content: {
+          'application/json': {
+            q: string;
+            /** @default 10 */
+            k?: number;
+          };
+        };
+      };
+      responses: {
+        /** @description Default Response */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': {
+              items: {
+                /** Format: uuid */
+                chunkId: string;
+                /** Format: uuid */
+                contentId: string;
+                /** Format: uuid */
+                versionId: string;
+                /** @enum {string} */
+                kind: 'clip' | 'audio' | 'document';
+                locator: {
+                  [key: string]: unknown;
+                };
+                snippet: string;
+                score: number;
+              }[];
+              /** @enum {string} */
+              retrievalMode: 'hybrid' | 'keyword_only';
+              degraded:
+                | (
+                    | 'embed_unavailable'
+                    | 'embed_timeout'
+                    | 'embed_refused'
+                    | 'pin_mismatch'
+                    | 'fallback_busy'
+                    | 'fallback_timeout'
+                    | 'fallback_cap'
+                    | 'vector_unavailable'
+                  )
+                | null;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/v1/content/{id}/engagement': {
     parameters: {
       query?: never;

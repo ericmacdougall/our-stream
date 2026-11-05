@@ -43,6 +43,7 @@ export const ContentState = z.enum(['draft', 'published', 'retracted']);
 
 export * from './m1a.js';
 export * from './m1b.js';
+export * from './m2a-retrieval.js';
 export type { M1aPaths, StreamMember } from './m1a-paths.js';
 export type { M1bPaths } from './m1b-paths.js';
 export { createClient, type ApiClient, type ApiPaths } from './client.js';
