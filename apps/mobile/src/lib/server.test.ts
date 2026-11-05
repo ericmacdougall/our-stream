@@ -66,4 +66,27 @@ describe('probeServer', () => {
     }) as unknown as FetchLike;
     expect(await probeServer('https://x.com', { fetch: down })).toBeNull();
   });
+  it('does not accept an answer reached through a redirect', async () => {
+    const body = JSON.stringify(META);
+    const viaRedirect = (async () =>
+      ({
+        ok: true,
+        status: 200,
+        url: 'https://evil.example/v1/meta',
+        redirected: true,
+        headers: new Headers(),
+        text: async () => body,
+      }) as unknown as Response) as FetchLike;
+    expect(await probeServer('https://x.com', { fetch: viaRedirect })).toBeNull();
+    const status302 = (async () =>
+      ({
+        ok: false,
+        status: 302,
+        url: 'https://x.com/v1/meta',
+        redirected: false,
+        headers: new Headers(),
+        text: async () => '',
+      }) as unknown as Response) as FetchLike;
+    expect(await probeServer('https://x.com', { fetch: status302 })).toBeNull();
+  });
 });

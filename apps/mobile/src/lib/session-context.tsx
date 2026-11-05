@@ -17,7 +17,14 @@ import type { z } from 'zod';
 import { createApi, logoutBestEffort } from './api';
 import type { ServerConfig } from './discovery';
 import { ALLOW_LOOPBACK_HTTP } from './runtime';
-import { clearSession, loadSession, saveLastServer, saveSession } from './session';
+import {
+  clearSession,
+  loadSession,
+  saveLastServer,
+  saveSession,
+  type StoredSession,
+} from './session';
+import { resolveStartup } from './startup';
 import { secureStore } from './storage';
 import { strings } from '../i18n';
 
@@ -74,37 +81,41 @@ export function SessionProvider(props: { children: ReactNode }) {
 
   useEffect(() => {
     let live = true;
-    (async () => {
-      const stored = await loadSession(secureStore, { allowLoopbackHttp: ALLOW_LOOPBACK_HTTP });
-      if (!stored) {
-        if (live) setState({ status: 'signedOut' });
-        return;
-      }
-      const api = build(stored.server, stored.secret);
-      try {
-        const { data, response } = await api.GET('/v1/me');
-        if (!live) return;
-        if (data) {
-          setState({ status: 'signedIn', server: stored.server, api, me: data as Me });
-        } else if (response.status === 401 || response.status === 403) {
-          // The hooks already cleared the session.
-        } else {
-          // Server error: keep the session, the screens show their own errors.
-          setState({ status: 'signedOut' });
-          setNotice(strings.errors.generic);
-        }
-      } catch {
-        // Offline: keep the stored session but we cannot show personalised data yet.
-        if (live) {
-          setState({ status: 'signedOut' });
-          setNotice(strings.errors.offline);
-        }
+    void (async () => {
+      const result = await resolveStartup<StoredSession & { api: ApiClient }, Me>({
+        load: async () => {
+          const stored = await loadSession(secureStore, { allowLoopbackHttp: ALLOW_LOOPBACK_HTTP });
+          return stored ? { ...stored, api: build(stored.server, stored.secret) } : null;
+        },
+        fetchMe: async (stored) => {
+          const { data, response } = await stored.api.GET('/v1/me');
+          return { data: data as Me | undefined, status: response.status };
+        },
+        notices: {
+          sessionExpired: strings.errors.sessionExpired,
+          generic: strings.errors.generic,
+          offline: strings.errors.offline,
+        },
+      });
+      if (!live) return;
+      if (result.kind === 'signedIn') {
+        setState({
+          status: 'signedIn',
+          server: result.stored.server,
+          api: result.stored.api,
+          me: result.me,
+        });
+      } else if (result.drop) {
+        await dropLocal(result.notice);
+      } else {
+        setState({ status: 'signedOut' });
+        setNotice(result.notice);
       }
     })();
     return () => {
       live = false;
     };
-  }, [build]);
+  }, [build, dropLocal]);
 
   const value = useMemo<SessionContextValue>(
     () => ({

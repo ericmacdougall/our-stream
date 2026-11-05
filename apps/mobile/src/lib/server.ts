@@ -18,11 +18,17 @@ async function isOurStream(url: string, fetch: FetchLike): Promise<boolean> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
   try {
-    const res = await fetch(`${url}/v1/meta`, {
+    const target = `${url}/v1/meta`;
+    const res = await fetch(target, {
       headers: { accept: 'application/json' },
       signal: controller.signal,
       credentials: 'omit',
+      // A redirect would let the typed address silently forward bearer-token requests elsewhere.
+      redirect: 'manual',
     });
+    if (res.status >= 300 && res.status < 400) return false;
+    // React Native's fetch cannot always stop redirects, so also require the answer to come from the URL asked for.
+    if (res.redirected || (res.url && res.url !== target)) return false;
     if (!res.ok) return false;
     const body = (await res.text()).slice(0, 4096);
     return MetaResponse.safeParse(JSON.parse(body)).success;
