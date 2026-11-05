@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Multipart upload parameters shared by the init request and Uppy so part counts always agree.
+import { checkDocumentFile, looksLikeDocument } from './documents';
+
 export const UPLOAD_CHUNK_BYTES = 8 * 1024 * 1024;
 export const UPLOAD_MAX_PARTS = 10_000;
 export const UPLOAD_MAX_BYTES = 4 * 1024 * 1024 * 1024;
@@ -37,6 +39,21 @@ export function mediaMimeType(fileName: string, browserType: string): string | n
   return BY_EXT[ext] ?? null;
 }
 
-export function contentKindFor(mimeType: string): 'clip' | 'audio' {
-  return mimeType.toLowerCase().startsWith('audio/') ? 'audio' : 'clip';
+/**
+ * The MIME type to declare at upload/init: a media type for video/audio files, the extension's allow-listed
+ * type for a valid document, else null (the caller shows the specific refusal from checkDocumentFile).
+ */
+export function uploadMimeType(file: { name: string; size: number; type?: string }): string | null {
+  if (looksLikeDocument(file.name)) {
+    const verdict = checkDocumentFile(file);
+    return verdict.ok ? verdict.mimeType : null;
+  }
+  return mediaMimeType(file.name, file.type ?? '');
+}
+
+export function contentKindFor(mimeType: string): 'clip' | 'audio' | 'document' {
+  const type = mimeType.toLowerCase();
+  if (type.startsWith('audio/')) return 'audio';
+  if (type.startsWith('video/')) return 'clip';
+  return 'document';
 }

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Maps API error codes to catalog messages; unknown codes get neutral copy so nothing leaks.
+import { documentErrorMessageId } from './documents';
 import { t, type MessageId } from './i18n';
 
 const KNOWN: Record<string, MessageId> = {
@@ -19,6 +20,8 @@ const KNOWN: Record<string, MessageId> = {
 };
 
 export function describeError(code: string | undefined, status?: number): string {
+  const documentMessage = documentErrorMessageId(code);
+  if (documentMessage) return t(documentMessage);
   if (code && KNOWN[code]) return t(KNOWN[code]);
   if (status === 401) return t('error.unauthorized');
   if (status === 403) return t('error.forbidden');

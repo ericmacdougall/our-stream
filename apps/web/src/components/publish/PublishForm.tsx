@@ -119,7 +119,7 @@ export function PublishForm({
         setError(message);
         return;
       }
-      router.push(publishAt ? `/content/${content.id}` : '/');
+      router.push(publishAt || content.kind === 'document' ? `/content/${content.id}` : '/');
       router.refresh();
     } catch {
       setError(t('error.network'));
@@ -134,7 +134,14 @@ export function PublishForm({
   return (
     <form onSubmit={(e) => void submit(e)} className="card form" noValidate aria-busy={pending}>
       <h2>{t('publish.heading', { title: content.title })}</h2>
-      {!ready ? <Notice kind="error">{t('publish.notReady')}</Notice> : null}
+      {!ready ? (
+        <Notice kind="error">
+          {content.kind === 'document' ? t('publish.notReadyDocument') : t('publish.notReady')}
+        </Notice>
+      ) : null}
+      {content.kind === 'document' ? (
+        <Notice id="not-scanned-notice">{t('documents.notScanned')}</Notice>
+      ) : null}
       <fieldset className="field" disabled={pending}>
         <legend>{t('publish.audience')}</legend>
         <label className="inline">

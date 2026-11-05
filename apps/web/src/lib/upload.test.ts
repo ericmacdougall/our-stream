@@ -6,6 +6,7 @@ import {
   contentKindFor,
   mediaMimeType,
   partCountFor,
+  uploadMimeType,
 } from './upload.js';
 
 describe('multipart sizing', () => {
@@ -34,5 +35,14 @@ describe('mediaMimeType', () => {
   it('derives the content kind', () => {
     expect(contentKindFor('audio/mpeg')).toBe('audio');
     expect(contentKindFor('video/mp4')).toBe('clip');
+    expect(contentKindFor('application/pdf')).toBe('document');
+    expect(contentKindFor('text/markdown')).toBe('document');
+  });
+  it('declares document types by extension and refuses legacy and oversize documents', () => {
+    expect(uploadMimeType({ name: 'a.pdf', size: 5, type: '' })).toBe('application/pdf');
+    expect(uploadMimeType({ name: 'a.mp4', size: 5, type: 'video/mp4' })).toBe('video/mp4');
+    expect(uploadMimeType({ name: 'a.doc', size: 5, type: 'application/msword' })).toBeNull();
+    expect(uploadMimeType({ name: 'a.pdf', size: 101 * 1024 * 1024, type: '' })).toBeNull();
+    expect(uploadMimeType({ name: 'a.exe', size: 5, type: '' })).toBeNull();
   });
 });

@@ -7,6 +7,13 @@ import type { z } from 'zod';
 import type { ContentDetail } from '@our-stream/contracts';
 import { browserApi } from '@/lib/api/client';
 import { errorMessage } from '@/lib/errors';
+import {
+  documentOf,
+  formatBytes,
+  isLiveNow,
+  originalDownloadHref,
+  type DocumentFormat,
+} from '@/lib/documents';
 import { formatTimestamp } from '@/lib/feed/chapters';
 import { externalHost } from '@/lib/links';
 import { t, type MessageId } from '@/lib/i18n';
@@ -72,6 +79,10 @@ export function ContentPanel({ initial }: { initial: Detail }) {
     }
   }
 
+  const isDocument = detail.kind === 'document';
+  const doc = documentOf(detail);
+  const live = isLiveNow(detail);
+  const failedDocument = isDocument && detail.currentVersion?.status === 'failed';
   const canRetract = detail.canEdit && detail.state !== 'retracted';
   const canPublish =
     detail.canEdit && detail.state !== 'retracted' && detail.currentVersion?.status === 'current';
@@ -96,13 +107,25 @@ export function ContentPanel({ initial }: { initial: Detail }) {
       </header>
       <section className="card" aria-labelledby="content-status-heading">
         <h2 id="content-status-heading">{t('content.statusHeading')}</h2>
-        <ProcessingStatus version={detail.currentVersion} />
+        <ProcessingStatus version={detail.currentVersion} kind={detail.kind} />
+        {failedDocument ? <p className="muted">{t('documents.failureIntro')}</p> : null}
+        {isDocument ? <Notice id="not-scanned-notice">{t('documents.notScanned')}</Notice> : null}
         <Notice kind="error">{error}</Notice>
         <div className="actions">
           {canPublish ? (
             <Link className="button primary" href={`/content/${detail.id}/publish`}>
               {detail.state === 'published' ? t('content.editAudience') : t('content.publish')}
             </Link>
+          ) : null}
+          {isDocument && live && detail.currentVersion?.status === 'current' ? (
+            <>
+              <Link className="button" href={`/documents/${detail.id}`}>
+                {t('documents.view')}
+              </Link>
+              <a className="button" href={originalDownloadHref(detail.id)}>
+                {t('documents.download')}
+              </a>
+            </>
           ) : null}
           {canRetract ? (
             <button
@@ -116,7 +139,11 @@ export function ContentPanel({ initial }: { initial: Detail }) {
           ) : null}
           {detail.canEdit && detail.state !== 'retracted' ? (
             <button type="button" onClick={() => setReplacing((r) => !r)} aria-expanded={replacing}>
-              {replacing ? t('common.cancel') : t('content.replace')}
+              {replacing
+                ? t('common.cancel')
+                : isDocument
+                  ? t('content.documentReplace')
+                  : t('content.replace')}
             </button>
           ) : null}
         </div>
@@ -126,6 +153,18 @@ export function ContentPanel({ initial }: { initial: Detail }) {
         <h2 id="content-meta-heading">{t('content.metaHeading')}</h2>
         {detail.description ? <p>{detail.description}</p> : null}
         <dl className="meta">
+          {doc ? (
+            <>
+              <dt>{t('documents.fileInfo')}</dt>
+              <dd data-testid="document-file">{doc.fileName}</dd>
+              <dt>{t('content.document.format')}</dt>
+              <dd>
+                {t(`documents.format.${doc.format}` satisfies `documents.format.${DocumentFormat}`)}
+              </dd>
+              <dt>{t('content.document.size')}</dt>
+              <dd>{formatBytes(doc.size)}</dd>
+            </>
+          ) : null}
           <dt>{t('upload.language')}</dt>
           <dd>{detail.language}</dd>
           <dt>{t('publish.audience')}</dt>
@@ -186,8 +225,12 @@ export function ContentPanel({ initial }: { initial: Detail }) {
           if (!pending) dialogRef.current?.close();
         }}
       >
-        <h2 id="retract-heading">{t('content.retractConfirmTitle')}</h2>
-        <p>{t('content.retractConfirmBody')}</p>
+        <h2 id="retract-heading">
+          {isDocument ? t('content.retractConfirmDocumentTitle') : t('content.retractConfirmTitle')}
+        </h2>
+        <p>
+          {isDocument ? t('content.retractConfirmDocumentBody') : t('content.retractConfirmBody')}
+        </p>
         <div className="actions">
           <button type="button" onClick={() => dialogRef.current?.close()} disabled={pending}>
             {t('content.keep')}

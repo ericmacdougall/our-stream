@@ -11,7 +11,8 @@ import type { ContentDetail } from '@our-stream/contracts';
 import { browserApi } from '@/lib/api/client';
 import { errorMessage } from '@/lib/errors';
 import { t } from '@/lib/i18n';
-import { chunkSizeFor, mediaMimeType, partCountFor } from '@/lib/upload';
+import { DOCUMENT_ACCEPT } from '@/lib/documents';
+import { chunkSizeFor, partCountFor, uploadMimeType } from '@/lib/upload';
 
 type Detail = z.output<typeof ContentDetail>;
 type Body = Record<string, never>;
@@ -53,7 +54,7 @@ export function createUploader(onProgress: (p: UploadProgress) => void): Uploade
           getChunkSize: (f: { size: number }) => chunkSizeFor(f.size),
           async createMultipartUpload(f: UppyFile<Meta, Body>) {
             const size = f.size ?? 0;
-            const mimeType = mediaMimeType(f.name ?? '', f.type ?? '');
+            const mimeType = uploadMimeType({ name: f.name ?? '', size, type: f.type ?? '' });
             if (!mimeType) throw new Error(t('upload.unsupportedType'));
             const result = await api.POST('/v1/content/{id}/upload/init', {
               params: { path: { id: contentId } },
@@ -188,7 +189,7 @@ export function FilePicker({
         id="file"
         name="file"
         type="file"
-        accept="video/*,audio/*"
+        accept={`video/*,audio/*,${DOCUMENT_ACCEPT}`}
         disabled={disabled}
         aria-describedby="file-hint"
         onChange={(e) => onFile(e.target.files?.[0] ?? null)}

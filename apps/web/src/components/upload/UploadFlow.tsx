@@ -8,9 +8,10 @@ import type { z } from 'zod';
 import type { ContentDetail } from '@our-stream/contracts';
 import { browserApi } from '@/lib/api/client';
 import { errorMessage } from '@/lib/errors';
+import { checkDocumentFile, looksLikeDocument, refusalMessageId } from '@/lib/documents';
 import { normaliseChapters, parseTimestamp } from '@/lib/feed/chapters';
 import { t } from '@/lib/i18n';
-import { contentKindFor, mediaMimeType } from '@/lib/upload';
+import { contentKindFor, uploadMimeType } from '@/lib/upload';
 import { ProcessingStatus } from '../content/ProcessingStatus';
 import { useContentPolling } from '../content/useContentPolling';
 import { Notice } from '../Notice';
@@ -21,7 +22,36 @@ import { createUploader, FilePicker, UploadProgressBar, type UploadProgress } fr
 type Detail = z.output<typeof ContentDetail>;
 type Phase = 'form' | 'creating' | 'uploading' | 'processing' | 'done' | 'error';
 
-export function UploadFlow({ replaceOf }: { replaceOf?: Detail }) {
+/** What is wrong with the picked file before any request, as a catalog message; null when fine. */
+export function fileProblem(
+  file: File | null,
+  options: { documentsEnabled: boolean | null; replaceKind?: Detail['kind'] | undefined },
+): string | null {
+  if (!file) return null;
+  const isDocument = looksLikeDocument(file.name);
+  if (options.replaceKind && options.replaceKind !== 'clip' && options.replaceKind !== 'audio') {
+    if (!isDocument) return t('upload.kindMismatchDocument');
+  } else if (options.replaceKind && isDocument) {
+    return t('upload.kindMismatchMedia');
+  }
+  if (isDocument) {
+    if (options.documentsEnabled === false) return t('upload.documentsOffHint');
+    const verdict = checkDocumentFile(file);
+    return verdict.ok ? null : t(refusalMessageId(verdict.reason));
+  }
+  return uploadMimeType({ name: file.name, size: file.size, type: file.type })
+    ? null
+    : t('upload.unsupportedType');
+}
+
+export function UploadFlow({
+  replaceOf,
+  documentsEnabled = null,
+}: {
+  replaceOf?: Detail;
+  /** The org flag when known (null = unknown, the API decides). Only gates document files. */
+  documentsEnabled?: boolean | null;
+}) {
   const [title, setTitle] = useState(replaceOf?.title ?? '');
   const [description, setDescription] = useState(replaceOf?.description ?? '');
   const [language, setLanguage] = useState(replaceOf?.language ?? 'en');
@@ -34,6 +64,8 @@ export function UploadFlow({ replaceOf }: { replaceOf?: Detail }) {
   const [created, setCreated] = useState<Detail | null>(null);
   const [uploadedVersionId, setUploadedVersionId] = useState<string | null>(null);
   const busy = useRef(false);
+  const problem = fileProblem(file, { documentsEnabled, replaceKind: replaceOf?.kind });
+  const isDocument = file !== null && looksLikeDocument(file.name);
   const { detail, processing, stalled } = useContentPolling(created, {
     untilVersionId: uploadedVersionId,
   });
@@ -54,17 +86,25 @@ export function UploadFlow({ replaceOf }: { replaceOf?: Detail }) {
       setError(t('upload.fileRequired'));
       return;
     }
-    const mimeType = mediaMimeType(file.name, file.type);
+    if (problem) {
+      setError(problem);
+      return;
+    }
+    const mimeType = uploadMimeType({ name: file.name, size: file.size, type: file.type });
     if (!mimeType) {
       setError(t('upload.unsupportedType'));
       return;
     }
-    const badChapter = chapters.find((c) => c.at.trim() !== '' && parseTimestamp(c.at) === null);
+    const badChapter = isDocument
+      ? undefined
+      : chapters.find((c) => c.at.trim() !== '' && parseTimestamp(c.at) === null);
     if (badChapter) {
       setError(t('upload.chapterInvalid', { value: badChapter.at }));
       return;
     }
-    const halfChapter = chapters.findIndex((c) => (c.at.trim() === '') !== (c.title.trim() === ''));
+    const halfChapter = isDocument
+      ? -1
+      : chapters.findIndex((c) => (c.at.trim() === '') !== (c.title.trim() === ''));
     if (halfChapter >= 0) {
       setError(t('upload.chapterIncomplete', { n: halfChapter + 1 }));
       return;
@@ -81,20 +121,24 @@ export function UploadFlow({ replaceOf }: { replaceOf?: Detail }) {
         target = replaceOf;
       } else {
         setPhase('creating');
+        const kind = contentKindFor(mimeType);
         const result = await browserApi().POST('/v1/content', {
           body: {
-            kind: contentKindFor(mimeType),
+            kind,
             title: title.trim(),
             description: description.trim(),
             language: language.trim() || 'en',
             links: links
               .filter((l) => l.url.trim() !== '')
               .map((l) => ({ kind: l.kind, url: l.url.trim(), label: l.label.trim() })),
-            chapters: normaliseChapters(
-              chapters
-                .filter((c) => c.at.trim() !== '' && c.title.trim() !== '')
-                .map((c) => ({ atMs: parseTimestamp(c.at) ?? 0, title: c.title })),
-            ),
+            chapters:
+              kind === 'document'
+                ? []
+                : normaliseChapters(
+                    chapters
+                      .filter((c) => c.at.trim() !== '' && c.title.trim() !== '')
+                      .map((c) => ({ atMs: parseTimestamp(c.at) ?? 0, title: c.title })),
+                  ),
           },
         });
         const message = errorMessage(result);
@@ -127,6 +171,7 @@ export function UploadFlow({ replaceOf }: { replaceOf?: Detail }) {
         <ProcessingStatus
           version={uploadedIsCurrent ? (final?.currentVersion ?? null) : null}
           pending={processing}
+          {...(final ? { kind: final.kind } : {})}
         />
         {stalled ? <Notice kind="error">{t('upload.pollingStalled')}</Notice> : null}
         {!processing && versionStatus === 'current' ? (
@@ -135,13 +180,15 @@ export function UploadFlow({ replaceOf }: { replaceOf?: Detail }) {
               {t('upload.continueToPublish')}
             </Link>
             <Link className="button" href={`/content/${id}`}>
-              {t('upload.viewContent')}
+              {final?.kind === 'document' ? t('upload.viewDocument') : t('upload.viewContent')}
             </Link>
           </div>
         ) : null}
         {versionStatus === 'failed' ? (
           <p>
-            <Link href={`/content/${id}`}>{t('upload.viewContent')}</Link>
+            <Link href={`/content/${id}`}>
+              {final?.kind === 'document' ? t('upload.viewDocument') : t('upload.viewContent')}
+            </Link>
           </p>
         ) : null}
       </section>
@@ -150,7 +197,13 @@ export function UploadFlow({ replaceOf }: { replaceOf?: Detail }) {
 
   return (
     <form onSubmit={(e) => void submit(e)} className="card form" noValidate aria-busy={working}>
-      <h2>{replaceOf ? t('upload.replaceHeading') : t('upload.heading')}</h2>
+      <h2>
+        {replaceOf
+          ? t('upload.replaceHeading')
+          : isDocument
+            ? t('upload.documentHeading')
+            : t('upload.heading')}
+      </h2>
       {!replaceOf ? (
         <>
           <div className="field">
@@ -192,18 +245,22 @@ export function UploadFlow({ replaceOf }: { replaceOf?: Detail }) {
             </small>
           </div>
           <LinksEditor links={links} onChange={setLinks} disabled={working} />
-          <ChaptersEditor chapters={chapters} onChange={setChapters} disabled={working} />
+          {isDocument ? null : (
+            <ChaptersEditor chapters={chapters} onChange={setChapters} disabled={working} />
+          )}
         </>
       ) : null}
       <FilePicker file={file} onFile={setFile} disabled={working} />
-      <Notice kind="error">{error}</Notice>
-      {phase === 'creating' ? <Notice>{t('upload.creating')}</Notice> : null}
+      <Notice kind="error">{problem ?? error}</Notice>
+      {phase === 'creating' ? (
+        <Notice>{isDocument ? t('upload.creatingDocument') : t('upload.creating')}</Notice>
+      ) : null}
       {phase === 'uploading' ? <UploadProgressBar progress={progress} /> : null}
       <div className="actions">
         <button
           type="submit"
           className="primary"
-          disabled={working || !file || (!replaceOf && title.trim() === '')}
+          disabled={working || !file || problem !== null || (!replaceOf && title.trim() === '')}
         >
           {working
             ? t('common.working')

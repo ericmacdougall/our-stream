@@ -40,3 +40,18 @@ export async function getMe() {
     return null;
   }
 }
+
+/**
+ * The org's documents flag as the API reports it (any member may read it): true/false, or null when the
+ * settings could not be read (the API then decides per request). The deployment kill switch is not part
+ * of it; it surfaces as 403 `feature_disabled` on the actions themselves.
+ */
+export async function getDocumentsEnabled(): Promise<boolean | null> {
+  try {
+    const api = await serverApi();
+    const { data } = await api.GET('/v1/org/settings');
+    return data ? data.documentsEnabled : null;
+  } catch {
+    return null;
+  }
+}

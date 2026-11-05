@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { z } from 'zod';
 import type { VersionSummary } from '@our-stream/contracts';
+import { failureMessageId } from '@/lib/documents';
 import { t, type MessageId } from '@/lib/i18n';
 
 type Version = z.output<typeof VersionSummary>;
@@ -17,17 +18,23 @@ const STATUS_LABEL: Record<Version['status'], MessageId> = {
 export function ProcessingStatus({
   version,
   pending = false,
+  kind,
 }: {
   version: Version | null;
   pending?: boolean;
+  /** Documents show a mapped failure reason and no duration or caption state. */
+  kind?: 'clip' | 'audio' | 'document';
 }) {
+  const isDocument = kind === 'document';
   if (!version) {
     return pending ? (
       <p role="status" aria-live="polite" data-testid="processing-status" data-status="processing">
         <strong>{t('content.status.processing')}</strong>
       </p>
     ) : (
-      <p className="muted">{t('content.status.noVersion')}</p>
+      <p className="muted">
+        {t(isDocument ? 'content.status.noDocument' : 'content.status.noVersion')}
+      </p>
     );
   }
   const busy = version.status === 'uploaded' || version.status === 'processing';
@@ -42,13 +49,16 @@ export function ProcessingStatus({
       {busy && version.processingStep
         ? ` · ${t('content.status.step', { step: version.processingStep })}`
         : ''}
-      {version.status === 'failed' && version.processingError
+      {version.status === 'failed' && isDocument
+        ? ` · ${t(failureMessageId(version.processingError))}`
+        : ''}
+      {version.status === 'failed' && !isDocument && version.processingError
         ? ` · ${version.processingError}`
         : ''}
-      {version.status === 'current' && version.durationMs !== null
+      {!isDocument && version.status === 'current' && version.durationMs !== null
         ? ` · ${t('content.duration', { seconds: Math.round(version.durationMs / 1000) })}`
         : ''}
-      {version.status === 'current'
+      {!isDocument && version.status === 'current'
         ? ` · ${version.hasCaptions ? t('content.captionsReady') : t('content.captionsMissing')}`
         : ''}
     </p>
