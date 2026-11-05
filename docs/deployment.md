@@ -39,7 +39,10 @@ docker compose -f infra/docker/docker-compose.yml up --build
 
 Services: `edge` (Caddy 2.11, the one origin browsers use), `web`, `api`, `worker`, `migrate` (runs once
 as `ourstream_admin`, then the API starts), `postgres` (pgvector), `storage` (SeaweedFS S3 gateway),
-`mailcatcher` (Mailpit) and the optional `whisper` profile. The edge, api, Postgres, S3 and Mailpit publish
+`mailcatcher` (Mailpit), the `parser` document sandbox (no network, read-only root, no secrets; see
+[documents.md](documents.md#parser-sandbox)), the one-shot `pin-index` job (embedding HNSW indexes, after `migrate`) and the
+optional `whisper` and `embeddings` profiles. Postgres is pinned to an exact pgvector release by digest
+(`pgvector/pgvector:0.8.7-pg17`; 0.8.0 or later is required, and the migration and the worker fail closed below it). The edge, api, Postgres, S3 and Mailpit publish
 loopback ports; `web` publishes none and is reachable only through the edge.
 
 Networks: `edge` (edge, web, api) has a fixed subnet so the edge can hold the static address the API trusts
@@ -118,6 +121,12 @@ What the chart deploys:
   ingress-nginx regex path literally), the request fails instead of arriving from inside the trusted range
   with a forged header. The template also refuses a values file with no `/api` route to the api or a web
   path under `/api` or `/media`. Egress is not restricted.
+- The document parser sandbox (`parser`): one replica with a deny-all ingress and egress NetworkPolicy that is always
+  rendered with it, no Secret, no ServiceAccount token, a read-only root and a 1 GiB limit, exchanging files with the
+  worker through one shared claim (`parser.io`: ReadWriteMany, or ReadWriteOnce with both pods on one node). A
+  `pin-index` post-install/post-upgrade Job builds the embedding indexes, and `embeddings.enabled` adds the
+  self-hosted Qwen3-Embedding-0.6B service (`worker.embed.provider=qwen-http`). Not exercised against a live cluster
+  in this repository (chart checks only).
 - Optional HPAs for api and web, off by default. Leave the api at one replica until budgets have a shared
   store.
 - Optional in-cluster dependencies for evaluation: a CloudNativePG `Cluster` (operator required; the image

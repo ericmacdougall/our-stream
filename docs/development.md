@@ -94,7 +94,7 @@ trust chain are described in `docs/deployment.md`.
 
 | event                                           | effect                                                                                                                                                                             |
 | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `content.version_uploaded` (`version_id` set)   | enqueue `media.process` (singleton per version, 3 retries with backoff)                                                                                                            |
+| `content.version_uploaded` (`version_id` set)   | enqueue `media.process` (singleton per version, 3 retries with backoff), or `document.process` for a `document` (decided by `platform_content_kind`; see documents.md)             |
 | `content.scheduled`, `content.expiry_scheduled` | read `publish_at`/`expires_at` from the database and enqueue `content.transition` jobs at those instants (payload times are ignored)                                               |
 | `content.published`                             | one `content.published` notification per member in `platform_audience_of_content`, dedupe `published:{versionId}`                                                                  |
 | `content.retracted`                             | one `content.retracted` notice per viewer of that version, dedupe `retracted:{versionId}`; title snapshot only with `org.settings.notify.include_title_after_access_loss = "true"` |
@@ -114,6 +114,10 @@ trust chain are described in `docs/deployment.md`.
 The transcript index itself is built by a database trigger in the transaction that makes a version current (migration 0009), not by a job.
 
 The worker exposes `GET /health` on `HOST` (default `127.0.0.1`) port `WORKER_HEALTH_PORT` (default 4001): 200 `{status: ok, bossStarted, lastDrainAt, lastDrainOk, uptimeSeconds}` while pg-boss is up and an outbox drain completed within three drain intervals (one minute of start-up grace), otherwise 503 `degraded`. Helm and compose probe this port; it serves nothing else.
+
+### Documents (M2a)
+
+`document.process` parses a document in the `parser` sandbox and `embed.*` jobs fill vectors; docs/documents.md is the reference. Locally: `pnpm --filter @our-stream/parser test` (real parsers, no Docker), `pnpm --filter @our-stream/documents test`, the worker's `src/documents.integration.ts` (`pnpm --filter @our-stream/worker test:integration` with the database variables; it uses a scratch database and needs pgvector 0.8.0 or later), and the sandbox suite on a real container runtime: `PARSER_RUNTIME=compose pnpm --filter @our-stream/parser test:integration` (builds the parser image; slow on a busy host). Set `PARSER_TEST_BUNDLE` to skip the image build. `EMBED_PROVIDER=fake` (default) needs no model.
 
 ### ASR providers (ADR-0008)
 
