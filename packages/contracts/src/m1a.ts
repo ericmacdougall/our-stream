@@ -20,8 +20,21 @@ export const SignupRequest = z.object({
   orgSlug: Slug,
 });
 export const LoginRequest = z.object({ email: Email, password: z.string().min(1).max(256) });
-export const MagicLinkRequest = z.object({ email: Email });
-export const MagicLinkConsumeRequest = z.object({ token: z.string().min(20).max(200) });
+/** base64url(SHA-256(verifier)) without padding: 32 bytes are exactly 43 characters. */
+export const MagicLinkClientChallenge = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
+export const MagicLinkRequest = z.object({
+  email: Email,
+  /** Sent by the mobile app only: binds the mailed link to the device that asked for it. */
+  clientChallenge: MagicLinkClientChallenge.optional(),
+});
+export const MagicLinkConsumeRequest = z.object({
+  token: z.string().min(20).max(200),
+  /** The random secret whose SHA-256 was sent as `clientChallenge`; required for a bound link. */
+  verifier: z
+    .string()
+    .regex(/^[A-Za-z0-9_-]{43,128}$/)
+    .optional(),
+});
 export const Membership = z.object({
   orgId: Uuid,
   slug: Slug,

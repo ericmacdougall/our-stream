@@ -48,11 +48,25 @@ An invited user signs in through the emailed link and may then choose a password
 
 ## Magic links and invites
 
-- `POST /v1/auth/magic-link` always answers `{ok: true}`; a link is sent only when the address has an
-  account. Links are single use and expire after `MAGIC_LINK_TTL_MINUTES` (`platform_magic_link_consume`
-  consumes atomically). The link is `${APP_BASE_URL}/magic?token=...`; the web app posts the token
-  to `POST /v1/auth/magic-link/consume`, and the mobile app handles the same path as a universal link
-  (`docs/mobile.md`).
+- `POST /v1/auth/magic-link` (`{email, clientChallenge?}`) always answers `{ok: true}`; a link is sent only
+  when the address has an account. Links are single use and expire after `MAGIC_LINK_TTL_MINUTES`
+  (`platform_magic_link_consume` consumes atomically). Without `clientChallenge` (the web) the link is
+  `${APP_BASE_URL}/magic?token=<T>`, and the web app posts the token to `POST /v1/auth/magic-link/consume`.
+- Device binding for the mobile app (PKCE-style). `clientChallenge` is `base64url(SHA-256(verifier))`
+  without padding, exactly 43 characters (`^[A-Za-z0-9_-]{43}$`; 400 otherwise); the 32 raw digest bytes
+  are stored on the link (`platform.magic_link.client_challenge`). For such a request the mailed link is
+  `${APP_BASE_URL}/magic?token=<T>&app=1`. `POST /v1/auth/magic-link/consume` takes
+  `{token, verifier?}` (`verifier` matches `^[A-Za-z0-9_-]{43,128}$`; 400 otherwise); the API hashes the
+  verifier's UTF-8 bytes with SHA-256. A bound link is consumed only when that digest equals the stored
+  challenge. A missing or wrong verifier is refused with the same `401 invalid_token` as an unknown,
+  expired or used token (no hint that the link is bound) and does **not** mark the link used, so a
+  spoofed attempt cannot destroy the legitimate link. Unbound links ignore the verifier.
+- Web handoff contract (implemented in `apps/web`, not by the API). `GET ${APP_BASE_URL}/magic?token=<T>&app=1`
+  must not consume or post the token anywhere. It shows an "Open in the our-stream app" link to
+  `ourstream://magic?token=<T>&server=<origin of the page>` (percent-encode both values; `server` is the
+  page's own origin, e.g. `https://stream.example.com`). Without `app=1` the page consumes the token as
+  before. The app accepts the link only if it started the request and `server` equals the origin of the
+  pinned server's `webUrl` (`docs/mobile.md`); no associated domains or intent filters are involved.
 - `POST /v1/invites` (org owner/admin) creates an account for the address if needed (no password), upserts
   the `invite` row and sends a link with purpose `invite`. Consuming it calls `platform_invite_accept`,
   which creates the membership, and the new session is bound to that org. A failed acceptance rolls the

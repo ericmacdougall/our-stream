@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Auth flows through the real database: signup/login/logout, cookie vs bearer, CSRF, magic links
 // (single use, expiry, replay control), invites, org switching, rate limiting and deactivation.
+import { createHash, randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
@@ -197,6 +198,76 @@ describe.skipIf(!integrationReady)('auth (integration)', () => {
     expect(
       (await h.call('POST', '/v1/auth/magic-link/consume', null, { token: 'short' })).status,
     ).toBe(400);
+  });
+
+  describe('device-bound magic links (mobile app)', () => {
+    const verifier = randomBytes(32).toString('base64url');
+    const challenge = createHash('sha256').update(verifier).digest('base64url');
+    const request = async (body: Record<string, unknown>) =>
+      h.call('POST', '/v1/auth/magic-link', null, { email: owner.email, ...body });
+    const mailedToken = () =>
+      decodeURIComponent(/token=([^\s&]+)/.exec(h.mailer.lastTo(owner.email)!.text)![1]!);
+    const consume = (token: string, v?: string) =>
+      h.call('POST', '/v1/auth/magic-link/consume', null, v ? { token, verifier: v } : { token });
+    const expectInvalid = (res: { status: number; body: unknown }) => {
+      expect(res.status).toBe(401);
+      expect((res.body as { error: { code: string } }).error.code).toBe('invalid_token');
+    };
+
+    it('mails an app=1 handoff link only for an app-started request; web links are unchanged', async () => {
+      expect((await request({ clientChallenge: challenge })).status).toBe(200);
+      const appMail = h.mailer.lastTo(owner.email)!.text;
+      expect(appMail).toMatch(/http:\/\/localhost:3000\/magic\?token=[^\s&]+&app=1/);
+      expect((await request({})).status).toBe(200);
+      const webMail = h.mailer.lastTo(owner.email)!.text;
+      expect(webMail).toContain('http://localhost:3000/magic?token=');
+      expect(webMail).not.toContain('app=1');
+    });
+
+    it('requires the verifier; a wrong or missing one is refused and does not burn the link', async () => {
+      await request({ clientChallenge: challenge });
+      const token = mailedToken();
+      expectInvalid(await consume(token)); // no verifier
+      const wrong = randomBytes(32).toString('base64url');
+      expectInvalid(await consume(token, wrong));
+      const row = await h.admin.query<{ used_at: Date | null }>(
+        'SELECT used_at FROM platform.magic_link WHERE token_hash = $1',
+        [sha256(token)],
+      );
+      expect(row.rows[0]!.used_at).toBeNull();
+      // The legitimate device still succeeds, exactly once.
+      const ok = await consume(token, verifier);
+      expect(ok.status).toBe(200);
+      expect((ok.body as { user: { id: string } }).user.id).toBe(owner.userId);
+      expectInvalid(await consume(token, verifier));
+    });
+
+    it('stores only the digest; an unbound web link ignores a verifier', async () => {
+      await request({ clientChallenge: challenge });
+      const token = mailedToken();
+      const row = await h.admin.query<{ client_challenge: Buffer }>(
+        'SELECT client_challenge FROM platform.magic_link WHERE token_hash = $1',
+        [sha256(token)],
+      );
+      expect(row.rows[0]!.client_challenge.equals(Buffer.from(challenge, 'base64url'))).toBe(true);
+      expect(row.rows[0]!.client_challenge.length).toBe(32);
+      await request({});
+      const unbound = mailedToken();
+      // An unbound (web) link is consumed with or without a verifier, as before.
+      expect((await consume(unbound, verifier)).status).toBe(200);
+      await request({});
+      expect((await consume(mailedToken())).status).toBe(200);
+    });
+
+    it('rejects a malformed clientChallenge or verifier with 400', async () => {
+      for (const bad of ['short', 'x'.repeat(44), `${'a'.repeat(42)}!`, 42]) {
+        expect((await request({ clientChallenge: bad })).status).toBe(400);
+      }
+      const token = 'a-valid-length-token-0123456789abcdef';
+      for (const bad of ['short', 'v'.repeat(129), `${'a'.repeat(42)}!`]) {
+        expect((await consume(token, bad)).status).toBe(400);
+      }
+    });
   });
 
   it('invite: creates the membership on consume, lists members, refuses re-inviting an active member', async () => {

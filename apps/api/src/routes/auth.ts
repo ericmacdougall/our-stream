@@ -249,6 +249,9 @@ export function registerAuthRoutes(fastify: FastifyInstance, ctx: AppContext): v
       const account = await accountByEmail(ctx.pool, emailNormalized);
       if (account) {
         const token = newSessionToken();
+        const challenge = req.body.clientChallenge
+          ? Buffer.from(req.body.clientChallenge, 'base64url')
+          : null;
         await magicLinkCreate(
           ctx.pool,
           account.id,
@@ -256,8 +259,14 @@ export function registerAuthRoutes(fastify: FastifyInstance, ctx: AppContext): v
           'login',
           null,
           ctx.config.MAGIC_LINK_TTL_MINUTES,
+          // base64url of the 32-byte digest (shape checked by the contract); stored as raw bytes.
+          challenge,
         );
-        const link = `${ctx.config.APP_BASE_URL}/magic?token=${encodeURIComponent(token)}`;
+        // An app-started request mails a page on this server that hands the token to the app's
+        // custom scheme (docs/api.md); `app=1` tells that page not to consume it.
+        const link = `${ctx.config.APP_BASE_URL}/magic?token=${encodeURIComponent(token)}${
+          challenge ? '&app=1' : ''
+        }`;
         await ctx.mailer.send(magicLinkMail(account.email, link, 'login'));
       }
       return { ok: true as const };
@@ -273,7 +282,11 @@ export function registerAuthRoutes(fastify: FastifyInstance, ctx: AppContext): v
     async (req, reply) => {
       const token = newSessionToken();
       const result = await withPlatform(ctx.pool, async (client) => {
-        const link = await magicLinkConsume(client, sha256(req.body.token));
+        const link = await magicLinkConsume(
+          client,
+          sha256(req.body.token),
+          req.body.verifier ? sha256(req.body.verifier) : null,
+        );
         if (!link)
           throw unauthorized('invalid_token', 'this link is invalid, expired or already used');
         let orgId: string | null;

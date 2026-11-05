@@ -179,16 +179,20 @@ export async function magicLinkCreate(
   purpose: 'login' | 'invite',
   orgId: string | null,
   ttlMinutes: number,
+  /** SHA-256 of the app's verifier (32 bytes) when the link is bound to a device. */
+  clientChallenge: Buffer | null = null,
 ): Promise<void> {
   await q.query(
-    'SELECT platform_magic_link_create($1, $2, $3, $4, make_interval(mins => $5::int))',
-    [userId, tokenHash, purpose, orgId, ttlMinutes],
+    'SELECT platform_magic_link_create($1, $2, $3, $4, make_interval(mins => $5::int), $6)',
+    [userId, tokenHash, purpose, orgId, ttlMinutes, clientChallenge],
   );
 }
 
 export async function magicLinkConsume(
   q: Queryable,
   tokenHash: Buffer,
+  /** SHA-256 of the presented verifier; a bound link is consumed only when it matches. */
+  verifierHash: Buffer | null = null,
 ): Promise<{
   userId: string;
   purpose: 'login' | 'invite' | 'verify';
@@ -198,7 +202,10 @@ export async function magicLinkConsume(
     user_id: string;
     purpose: 'login' | 'invite' | 'verify';
     org_id: string | null;
-  }>('SELECT user_id, purpose, org_id FROM platform_magic_link_consume($1)', [tokenHash]);
+  }>('SELECT user_id, purpose, org_id FROM platform_magic_link_consume($1, $2)', [
+    tokenHash,
+    verifierHash,
+  ]);
   const row = r.rows[0];
   return row ? { userId: row.user_id, purpose: row.purpose, orgId: row.org_id } : null;
 }
