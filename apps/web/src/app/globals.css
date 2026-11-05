@@ -13,6 +13,7 @@
   --color-danger-contrast: #ffffff;
   --color-error-bg: #fbe9e6;
   --color-success-bg: #e4f3ee;
+  --color-mark-bg: #fbe58a;
   --color-scrim: rgba(0, 0, 0, 0.72);
   --radius: 10px;
   --space-1: 0.5rem;
@@ -36,6 +37,7 @@
     --color-danger-contrast: #1a0806;
     --color-error-bg: #3a1a16;
     --color-success-bg: #163129;
+    --color-mark-bg: #5c4a00;
   }
 }
 * {
@@ -512,4 +514,30 @@ button.danger {
     transition: none !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* M2a documents */
+.doc-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-width: 70ch;
+}
+.doc-section {
+  scroll-margin-top: calc(var(--nav-height) + var(--space-2));
+}
+.doc-anchors {
+  columns: 12rem;
+}
+.results h3 {
+  margin: 0 0 0.25rem;
+}
+.snippet {
+  margin: 0.3rem 0;
+  overflow-wrap: anywhere;
+}
+mark {
+  background: var(--color-mark-bg);
+  color: var(--color-text);
+  border-radius: 2px;
+  padding: 0 0.1em;
 }

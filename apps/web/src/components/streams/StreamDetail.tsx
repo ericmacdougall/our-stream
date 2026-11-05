@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
+import Link from 'next/link';
 import { useState, type FormEvent } from 'react';
 import type { z } from 'zod';
 import type { MemberSummary, Stream, StreamMember, StreamRole } from '@our-stream/contracts';
@@ -81,6 +82,9 @@ export function StreamDetail({
           {stream.myRole ? ` · ${t('streams.myRole', { role: stream.myRole })}` : ''}
         </p>
       </header>
+      <p>
+        <Link href={`/streams/${stream.id}/documents`}>{t('documents.streamLink')}</Link>
+      </p>
       <section aria-labelledby="members-heading" className="card">
         <h2 id="members-heading">{t('streams.membersHeading')}</h2>
         {members.length === 0 ? (

@@ -55,7 +55,11 @@ export function NavBar() {
   const links: { href: string; label: string }[] = [
     { href: '/', label: t('nav.feed') },
     { href: '/streams', label: t('nav.streams') },
+    { href: '/documents', label: t('nav.documents') },
     { href: '/upload', label: t('nav.upload') },
+    ...(me.org?.role === 'owner' || me.org?.role === 'admin'
+      ? [{ href: '/settings', label: t('nav.settings') }]
+      : []),
   ];
 
   return (
