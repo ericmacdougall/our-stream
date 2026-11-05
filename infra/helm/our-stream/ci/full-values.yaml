@@ -25,6 +25,16 @@ worker:
   mediaMaxInputBytes: 1073741824
   scratch:
     sizeLimit: 4Gi
+  embed:
+    provider: qwen-http
+parser:
+  io:
+    storage:
+      storageClass: standard
+embeddings:
+  enabled: true
+  storage:
+    storageClass: standard
 secrets:
   migrate:
     existingSecret: our-stream-pg-app

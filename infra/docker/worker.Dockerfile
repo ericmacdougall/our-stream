@@ -9,6 +9,7 @@ COPY apps/worker/package.json apps/worker/
 COPY packages/db/package.json packages/db/
 COPY packages/pipeline/package.json packages/pipeline/
 COPY packages/providers/package.json packages/providers/
+COPY packages/documents/package.json packages/documents/
 COPY packages/notifications/package.json packages/notifications/
 COPY packages/config/package.json packages/config/
 RUN pnpm install --frozen-lockfile --filter @our-stream/worker...
@@ -18,6 +19,7 @@ COPY tsconfig.base.json ./
 COPY packages/config packages/config
 COPY packages/db packages/db
 COPY packages/providers packages/providers
+COPY packages/documents packages/documents
 COPY packages/pipeline packages/pipeline
 COPY packages/notifications packages/notifications
 COPY apps/worker apps/worker

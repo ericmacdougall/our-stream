@@ -301,6 +301,23 @@
               ]
             }
           }
+        },
+        "embed": {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "enum": ["fake", "qwen-http"]
+            },
+            "model": {
+              "type": "string",
+              "minLength": 1
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"]
         }
       },
       "required": ["replicaCount", "asr", "providerPolicy", "scratch"]
@@ -454,6 +471,11 @@
             },
             "platformRoleSecret": {
               "$ref": "#/$defs/secretName"
+            },
+            "pgvectorVersion": {
+              "type": "string",
+              "pattern": "^0\\.([89]|[1-9][0-9])\\.[0-9]+$|^[1-9][0-9]*\\.[0-9]+\\.[0-9]+$",
+              "description": "pgvector release the image ships; at least 0.8.0"
             }
           },
           "required": ["enabled", "instances", "imageName", "appRoleSecret", "platformRoleSecret"]
@@ -501,6 +523,135 @@
         }
       },
       "required": ["enabled", "parentRefs"]
+    },
+    "parser": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "replicaCount": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1,
+          "description": "one job slot per pod, on a shared volume"
+        },
+        "logLevel": {
+          "type": "string"
+        },
+        "io": {
+          "type": "object",
+          "properties": {
+            "existingClaim": {
+              "type": "string"
+            },
+            "storage": {
+              "type": "object",
+              "properties": {
+                "size": {
+                  "type": "string",
+                  "pattern": "^[0-9]+(\\.[0-9]+)?(Ki|Mi|Gi|Ti|k|M|G|T)?$"
+                },
+                "storageClass": {
+                  "type": "string"
+                },
+                "accessModes": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "string",
+                    "enum": ["ReadWriteOnce", "ReadWriteMany", "ReadWriteOncePod"]
+                  }
+                }
+              },
+              "required": ["size", "accessModes"]
+            }
+          },
+          "required": ["storage"]
+        },
+        "resources": {
+          "type": "object"
+        },
+        "podAnnotations": {
+          "type": "object"
+        },
+        "nodeSelector": {
+          "type": "object"
+        },
+        "tolerations": {
+          "type": "array"
+        },
+        "affinity": {
+          "type": "object"
+        }
+      },
+      "required": ["enabled", "replicaCount", "io"]
+    },
+    "embeddings": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "image": {
+          "type": "string",
+          "pattern": "@sha256:[0-9a-f]{64}$",
+          "description": "pinned by digest"
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "revision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "storage": {
+          "type": "object",
+          "properties": {
+            "size": {
+              "type": "string"
+            },
+            "storageClass": {
+              "type": "string"
+            }
+          },
+          "required": ["size"]
+        },
+        "resources": {
+          "type": "object"
+        },
+        "nodeSelector": {
+          "type": "object"
+        },
+        "tolerations": {
+          "type": "array"
+        },
+        "affinity": {
+          "type": "object"
+        }
+      },
+      "required": ["enabled", "image", "model", "revision"]
+    },
+    "pinIndex": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "backoffLimit": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "activeDeadlineSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "resources": {
+          "type": "object"
+        }
+      },
+      "required": ["enabled", "backoffLimit", "activeDeadlineSeconds"]
     }
   },
   "required": [

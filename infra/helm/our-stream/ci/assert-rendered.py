@@ -171,6 +171,72 @@ def check_network_policies(docs, problems):
                     problems.append(f"NetworkPolicy/{name}: web pods must not be allowed to reach the api")
 
 
+def quantity_bytes(q):
+    m = re.match(r"^([0-9]+)(Ki|Mi|Gi|Ti)?$", str(q))
+    if not m:
+        return None
+    return int(m.group(1)) * {None: 1, "Ki": 1024, "Mi": 1024**2, "Gi": 1024**3, "Ti": 1024**4}[m.group(2)]
+
+
+def check_parser(docs, problems):
+    """The parser sandbox (M2a): one replica, no Secret, no token, a read-only root, bounded memory, only the
+    shared job volume and a memory-backed /tmp, and a deny-all ingress+egress NetworkPolicy of its own. Nothing
+    else may mount the job claim except the worker."""
+    parsers = [d for d in docs if d.get("kind") == "Deployment" and component(d) == "parser"]
+    if not parsers:
+        return
+    if len(parsers) != 1:
+        problems.append(f"expected one parser Deployment, found {len(parsers)}")
+    doc = parsers[0]
+    where = f"Deployment/{doc['metadata']['name']}"
+    spec = doc["spec"]
+    pod = pod_spec(doc)
+    if spec.get("replicas") != 1:
+        problems.append(f"{where}: parser must have exactly one replica (one job slot)")
+    if pod.get("automountServiceAccountToken") is not False:
+        problems.append(f"{where}: parser must not mount a ServiceAccount token")
+    for c in pod.get("containers") or []:
+        cname = f"{where} container {c.get('name')}"
+        if (c.get("securityContext") or {}).get("readOnlyRootFilesystem") is not True:
+            problems.append(f"{cname}: parser must have a read-only root filesystem")
+        for e in c.get("env") or []:
+            if "valueFrom" in e:
+                problems.append(f"{cname}: parser must not read Secrets or ConfigMaps ({e['name']})")
+            if e["name"] not in ("NODE_ENV", "PARSER_SLOT_DIR", "PARSER_CTL_DIR"):
+                problems.append(f"{cname}: parser environment must be only its directories (got {e['name']})")
+        limit = quantity_bytes(((c.get("resources") or {}).get("limits") or {}).get("memory"))
+        if limit is None or limit > 1024**3:
+            problems.append(f"{cname}: parser memory limit must be set and at most 1Gi")
+        mounts = {(m["name"], m.get("subPath")) for m in c.get("volumeMounts") or []}
+        if mounts != {("io", "slot"), ("io", "ctl"), ("tmp", None)}:
+            problems.append(f"{cname}: parser may mount only the job slot, ctl and /tmp (got {sorted(map(str, mounts))})")
+    kinds = {v["name"]: [k for k in v if k != "name"] for v in pod.get("volumes") or []}
+    if kinds != {"io": ["persistentVolumeClaim"], "tmp": ["emptyDir"]}:
+        problems.append(f"{where}: parser volumes must be the job claim and an emptyDir (got {kinds})")
+    policies = [
+        d for d in docs
+        if d.get("kind") == "NetworkPolicy"
+        and ((d["spec"].get("podSelector") or {}).get("matchLabels") or {}).get("app.kubernetes.io/component") == "parser"
+    ]
+    deny = [
+        p for p in policies
+        if sorted(p["spec"].get("policyTypes") or []) == ["Egress", "Ingress"]
+        and not p["spec"].get("ingress")
+        and not p["spec"].get("egress")
+    ]
+    if not deny:
+        problems.append("no parser deny-all NetworkPolicy (Ingress and Egress, no rules) selects the parser pods")
+    if len(policies) != len(deny):
+        problems.append("a NetworkPolicy selecting the parser pods allows traffic; the parser must be deny-all")
+    claim = next((v["persistentVolumeClaim"]["claimName"] for v in pod.get("volumes") or [] if v["name"] == "io"), None)
+    for d in docs:
+        if d.get("kind") not in POD_KINDS or d is doc:
+            continue
+        for v in pod_spec(d).get("volumes") or []:
+            if (v.get("persistentVolumeClaim") or {}).get("claimName") == claim and component(d) != "worker":
+                problems.append(f"{d['kind']}/{d['metadata']['name']}: only the worker may mount the parser job claim")
+
+
 def check(path, expectations, markers):
     problems = []
     text = pathlib.Path(path).read_text(encoding="utf-8")
@@ -187,6 +253,7 @@ def check(path, expectations, markers):
     check_workloads(docs, problems)
     check_routing(docs, problems)
     check_network_policies(docs, problems)
+    check_parser(docs, problems)
     return problems
 
 

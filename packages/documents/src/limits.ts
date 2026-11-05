@@ -32,7 +32,7 @@ export const DEFAULT_LIMITS: Readonly<ParseLimits> = Object.freeze({
   maxXlsxCells: 1_000_000,
   maxCsvLineBytes: 1 * MIB,
   wallMs: 120_000,
-  heapMb: 768,
+  heapMb: 640,
   maxBlocks: 1_000_000,
 });
 

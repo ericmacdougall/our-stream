@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+{{- if .Values.parser.enabled }}
+# Deny-all ingress and egress for the parser sandbox: no policy rules means nothing is allowed in either
+# direction (no DNS either). Rendered whenever the parser is, whatever `networkPolicy.enabled` says. The
+# parser's start-up self-test (an outbound connection must fail) is the same check docker compose gets from
+# `network_mode: none`; the CNI must enforce NetworkPolicy for this to hold (kindnet and plain flannel do
+# not), otherwise the self-test reports an open network and the worker refuses document jobs.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "our-stream.fullname" . }}-parser-deny-all
+  labels:
+    {{- include "our-stream.labels" . | nindent 4 }}
+    app.kubernetes.io/component: parser
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "our-stream.selectorLabels" (dict "root" . "component" "parser") | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+{{- end }}

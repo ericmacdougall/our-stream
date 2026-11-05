@@ -1,0 +1,62 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+{{- if .Values.pinIndex.enabled }}
+# Post-migrate embedding index job (M2a): `pin-cli ensure` creates each live pin's HNSW index with
+# CREATE INDEX CONCURRENTLY IF NOT EXISTS (an INVALID leftover is rebuilt) and writes readiness. Idempotent;
+# with the migrate Job, the only workload that sees the admin connection string. Runs after the migrate Job
+# (hook weight 5 versus 0) on every install and upgrade.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "our-stream.fullname" . }}-pin-index
+  labels:
+    {{- include "our-stream.labels" . | nindent 4 }}
+    app.kubernetes.io/component: pin-index
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: '5'
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.pinIndex.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.pinIndex.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "our-stream.selectorLabels" (dict "root" . "component" "pin-index") | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: pin-index
+          image: {{ include "our-stream.image" (dict "root" . "component" "worker") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          command: ['node', 'dist/pin-cli.js', 'ensure']
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: DATABASE_ADMIN_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.migrate.existingSecret }}
+                  key: {{ .Values.secrets.migrate.key }}
+            - name: DATABASE_PLATFORM_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.app.existingSecret }}
+                  key: DATABASE_PLATFORM_URL
+          resources:
+            {{- toYaml .Values.pinIndex.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 64Mi }
+{{- end }}

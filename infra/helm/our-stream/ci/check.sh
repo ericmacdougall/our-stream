@@ -45,12 +45,12 @@ kubeconform -strict -summary -kubernetes-version "$K8S_VERSION" \
   "$OUT/default.yaml" "$OUT/full.yaml"
 
 echo "== invariants on the renderings"
-python3 "$ASSERT" --expect Deployment=3 --expect Job=1 --expect Service=2 --expect Ingress=2 \
-  --expect NetworkPolicy=3 --expect HorizontalPodAutoscaler=0 --expect Cluster=0 --expect StatefulSet=0 \
-  --expect HTTPRoute=0 --expect ServiceAccount=1 "$OUT/default.yaml"
-python3 "$ASSERT" --expect Deployment=3 --expect Job=1 --expect Service=3 --expect Ingress=2 \
-  --expect NetworkPolicy=4 --expect HorizontalPodAutoscaler=2 --expect Cluster=1 --expect StatefulSet=1 \
-  --expect HTTPRoute=1 --expect ServiceAccount=1 "$OUT/full.yaml"
+python3 "$ASSERT" --expect Deployment=4 --expect Job=2 --expect Service=2 --expect Ingress=2 \
+  --expect NetworkPolicy=4 --expect HorizontalPodAutoscaler=0 --expect Cluster=0 --expect StatefulSet=0 \
+  --expect HTTPRoute=0 --expect ServiceAccount=1 --expect PersistentVolumeClaim=1 "$OUT/default.yaml"
+python3 "$ASSERT" --expect Deployment=5 --expect Job=2 --expect Service=4 --expect Ingress=2 \
+  --expect NetworkPolicy=5 --expect HorizontalPodAutoscaler=2 --expect Cluster=1 --expect StatefulSet=1 \
+  --expect HTTPRoute=1 --expect ServiceAccount=1 --expect PersistentVolumeClaim=2 "$OUT/full.yaml"
 
 echo "== failing controls"
 expect_failure() {
@@ -73,6 +73,17 @@ expect_failure "/api path routed to web" 'must not route /api to web' -- helm te
 expect_failure "api.env.SESSION_SECRET" SESSION_SECRET -- helm template our-stream "$CHART" --set 'api.env.SESSION_SECRET=x'
 expect_failure "scratch below 2x max input" scratch -- helm template our-stream "$CHART" --set 'worker.scratch.sizeLimit=1Gi'
 expect_failure "empty ingressNamespaceSelector" ingressNamespaceSelector -- helm template our-stream "$CHART" --set 'networkPolicy.ingressNamespaceSelector=null'
+# the parser sandbox: one job slot per pod, and nothing the schema would let an operator weaken
+expect_failure "parser.replicaCount=2" replicaCount -- helm template our-stream "$CHART" --set 'parser.replicaCount=2'
+expect_failure "embeddings image not pinned by digest" image -- helm template our-stream "$CHART" --set 'embeddings.image=ghcr.io/huggingface/text-embeddings-inference:cpu-1.8'
+expect_failure "pgvector below 0.8.0" pgvectorVersion -- helm template our-stream "$CHART" --set 'postgresql.cloudnativepg.pgvectorVersion=0.7.4'
+helm template our-stream "$CHART" --namespace our-stream --set parser.enabled=false > "$OUT/no-parser.yaml"
+if grep -q 'component: parser' "$OUT/no-parser.yaml"; then echo "control failed: parser.enabled=false still renders parser resources" >&2; exit 1; fi
+echo "ok: parser.enabled=false renders no parser resources"
+# a parser rendering that weakens the sandbox is rejected for each reason it violates
+for needle in 'no parser deny-all NetworkPolicy' 'parser must not read Secrets' 'parser must have a read-only root' 'parser memory limit' 'parser may mount only' 'parser volumes must be' 'one replica' 'ServiceAccount token' 'only the worker may mount the parser job claim' 'allows traffic'; do
+  expect_failure "bad-parser.yaml ($needle)" "$needle" -- python3 "$ASSERT" --expect Deployment=2 "$CHART/ci/fixtures/bad-parser.yaml"
+done
 # a rendering that violates the invariants is rejected for each reason it violates
 for needle in privileged hostNetwork DATABASE_ADMIN_URL TRUST_PROXY runAsNonRoot 'development secret' envFrom 'expected 1 x Job' 'routed to web' 'every namespace' 'must not be allowed to reach the api'; do
   expect_failure "bad-rendered.yaml ($needle)" "$needle" -- python3 "$ASSERT" --expect Deployment=1 --expect Job=1 "$CHART/ci/fixtures/bad-rendered.yaml"

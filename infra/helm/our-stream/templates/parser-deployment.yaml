@@ -1,0 +1,94 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+{{- if .Values.parser.enabled }}
+# Document parser sandbox. No Secret, no ServiceAccount token, no Service, no env but two directories; a
+# read-only root filesystem with a memory-backed /tmp; one replica (one job slot per pod, the slot is on the
+# shared volume). Its network isolation is the deny-all NetworkPolicy in parser-networkpolicy.yaml.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "our-stream.fullname" . }}-parser
+  labels:
+    {{- include "our-stream.labels" . | nindent 4 }}
+    app.kubernetes.io/component: parser
+spec:
+  replicas: {{ .Values.parser.replicaCount }}
+  # The slot volume has one writer at a time: never run an old and a new pod together.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "our-stream.selectorLabels" (dict "root" . "component" "parser") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "our-stream.selectorLabels" (dict "root" . "component" "parser") | nindent 8 }}
+      {{- with .Values.parser.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: parser
+          image: {{ include "our-stream.image" (dict "root" . "component" "parser") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: PARSER_SLOT_DIR
+              value: /slot
+            - name: PARSER_CTL_DIR
+              value: /ctl
+          # Healthy while the heartbeat is fresh and its self-test passed (the same file the worker attests).
+          livenessProbe:
+            exec:
+              command:
+                - node
+                - -e
+                - "const h=JSON.parse(require('fs').readFileSync('/ctl/heartbeat.json','utf8'));process.exit(Date.now()-Date.parse(h.ts)<30000?0:1)"
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 4
+          resources:
+            {{- toYaml .Values.parser.resources | nindent 12 }}
+          volumeMounts:
+            - name: io
+              mountPath: /slot
+              subPath: slot
+            - name: io
+              mountPath: /ctl
+              subPath: ctl
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: io
+          persistentVolumeClaim:
+            claimName: {{ include "our-stream.parserIoClaim" . }}
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 256Mi
+      {{- with .Values.parser.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.parser.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.parser.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

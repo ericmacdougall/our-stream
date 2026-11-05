@@ -131,3 +131,8 @@ the kubelet evicts the pod in the middle of a job. Accepts Gi and Mi quantities.
   value: {{ $v | toString | quote }}
 {{- end }}
 {{- end -}}
+
+{{/* Name of the claim shared by worker and parser (slot and ctl subPaths). */}}
+{{- define "our-stream.parserIoClaim" -}}
+{{- default (printf "%s-parser-io" (include "our-stream.fullname" .)) .Values.parser.io.existingClaim -}}
+{{- end -}}

@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+{{- if and .Values.parser.enabled (not .Values.parser.io.existingClaim) }}
+{{- $io := .Values.parser.io }}
+# The job volume shared by the worker (slot, ctl) and the parser sandbox. Only these two directories travel
+# between them: the original file of the one job in flight, its job and result files, the heartbeat and the
+# challenge files. See docs/documents.md "Parser sandbox".
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "our-stream.parserIoClaim" . }}
+  labels:
+    {{- include "our-stream.labels" . | nindent 4 }}
+    app.kubernetes.io/component: parser
+spec:
+  accessModes:
+    {{- toYaml $io.storage.accessModes | nindent 4 }}
+  {{- if $io.storage.storageClass }}
+  storageClassName: {{ $io.storage.storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $io.storage.size | quote }}
+{{- end }}

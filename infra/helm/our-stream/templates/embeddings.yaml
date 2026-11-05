@@ -1,0 +1,120 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+{{- if .Values.embeddings.enabled }}
+{{- $e := .Values.embeddings }}
+# Self-hosted embedding service: Hugging Face text-embeddings-inference serving Qwen3-Embedding-0.6B on the
+# OpenAI-compatible /v1/embeddings route. ClusterIP only; the worker is its one client. The model revision is
+# pinned; the first start downloads it into the cache volume (the only egress this deployment needs).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "our-stream.fullname" . }}-embeddings-cache
+  labels:
+    {{- include "our-stream.labels" . | nindent 4 }}
+    app.kubernetes.io/component: embeddings
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- if $e.storage.storageClass }}
+  storageClassName: {{ $e.storage.storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $e.storage.size | quote }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "our-stream.fullname" . }}-embeddings
+  labels:
+    {{- include "our-stream.labels" . | nindent 4 }}
+    app.kubernetes.io/component: embeddings
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "our-stream.selectorLabels" (dict "root" . "component" "embeddings") | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "our-stream.fullname" . }}-embeddings
+  labels:
+    {{- include "our-stream.labels" . | nindent 4 }}
+    app.kubernetes.io/component: embeddings
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "our-stream.selectorLabels" (dict "root" . "component" "embeddings") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "our-stream.selectorLabels" (dict "root" . "component" "embeddings") | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: embeddings
+          image: {{ $e.image | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          args:
+            - --model-id
+            - {{ $e.model | quote }}
+            - --revision
+            - {{ $e.revision | quote }}
+            - --port
+            - '8080'
+          env:
+            - name: HF_HOME
+              value: /data
+            - name: HUGGINGFACE_HUB_CACHE
+              value: /data
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          startupProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 10
+            failureThreshold: 90
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 10
+          resources:
+            {{- toYaml $e.resources | nindent 12 }}
+          volumeMounts:
+            - name: cache
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: cache
+          persistentVolumeClaim:
+            claimName: {{ include "our-stream.fullname" . }}-embeddings-cache
+        - name: tmp
+          emptyDir: { sizeLimit: 512Mi }
+      {{- with $e.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $e.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $e.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

@@ -39,7 +39,9 @@ x-app-env: &app-env
 
 services:
   postgres:
-    image: pgvector/pgvector:pg17
+    # Pinned to an exact pgvector release (>= 0.8.0 is required for iterative index scans; the worker and the
+    # migration both check the installed version and fail closed below it). Bump deliberately, with the digest.
+    image: pgvector/pgvector:0.8.7-pg17@sha256:7d0a41464797aeb9862dfdc0bbf1526b82cfd324cdd8036df19e3545f4a9ccb8
     environment:
       POSTGRES_USER: ourstream_admin
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ourstream-dev-only}
@@ -161,12 +163,28 @@ services:
       WHISPER_URL: http://whisper:8080
       FFMPEG_THREADS: ${FFMPEG_THREADS:-4}
       MEDIA_MAX_INPUT_BYTES: ${MEDIA_MAX_INPUT_BYTES:-4294967296}
+      # Documents (M2a): the parser sandbox is reached only through two shared volumes (no network), and
+      # embeddings go through the policy router to the pinned model. `fake` is a deterministic stand-in for CI
+      # and development (not semantic; refused when NODE_ENV=production); `qwen-http` talks to the optional
+      # `embeddings` profile service below (Qwen3-Embedding-0.6B, Apache-2.0, 1024 dimensions).
+      PARSER_SLOT_DIR: /parser-io/slot
+      PARSER_CTL_DIR: /parser-io/ctl
+      EMBED_PROVIDER: ${EMBED_PROVIDER:-fake}
+      EMBED_MODEL: ${EMBED_MODEL:-Qwen3-Embedding-0.6B}
+      EMBED_URL: http://embeddings:80
     networks: [backend]
     read_only: true
     # Media scratch space (WORKER_TMP_DIR) and ffmpeg's temp files live in memory-backed mounts; bind a
     # volume at /var/tmp/ourstream instead when inputs approach MEDIA_MAX_INPUT_BYTES.
     tmpfs: [/tmp, /var/tmp/ourstream]
+    volumes:
+      - parser-slot:/parser-io/slot
+      - parser-ctl:/parser-io/ctl
     depends_on:
+      parser:
+        # Started, not healthy: an unavailable sandbox is retried by the job and fails the version once the
+        # retries run out (docs/documents.md), so the worker never blocks on it.
+        condition: service_started
       migrate:
         condition: service_completed_successfully
       storage:
@@ -183,6 +201,93 @@ services:
       interval: 10s
       timeout: 3s
       retries: 30
+
+  parser:
+    # Document parser sandbox (M2a). Untrusted PDF/DOCX/PPTX/XLSX/CSV/Markdown files are parsed here and nowhere
+    # else. It talks to the worker only through two shared volumes: a single job slot (/slot, one job at a
+    # time, wiped after each job) and a control directory (/ctl: heartbeat and challenge files). Everything
+    # that matters is enforced by Docker, not by the application: no network at all, read-only root, tmpfs
+    # scratch, non-root, no capabilities, pid and memory cgroup limits, and no secrets (it deliberately does not
+    # use the shared app environment). The parser's start-up self-test and `scripts/check-parser-sandbox`
+    # (apps/parser/src/runtime.integration.ts) verify these on the running container.
+    build:
+      context: ../..
+      dockerfile: infra/docker/parser.Dockerfile
+    network_mode: none
+    read_only: true
+    user: '1000:1000'
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    pids_limit: 128
+    mem_limit: 1g
+    memswap_limit: 1g
+    cpus: 2
+    restart: unless-stopped
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m
+    environment:
+      PARSER_SLOT_DIR: /slot
+      PARSER_CTL_DIR: /ctl
+    volumes:
+      - parser-slot:/slot
+      - parser-ctl:/ctl
+    healthcheck:
+      # Healthy while the heartbeat file is fresh (the same file the worker's attestation reads).
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "const h=JSON.parse(require('fs').readFileSync('/ctl/heartbeat.json','utf8'));process.exit(Date.now()-Date.parse(h.ts)<15000&&h.selfTest.ok?0:1)",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  pin-index:
+    # Post-migrate embedding index job (M2a): CREATE INDEX CONCURRENTLY IF NOT EXISTS for every pin that is not
+    # retired, rebuilding an INVALID leftover, then writes readiness. Idempotent; the only workload besides
+    # `migrate` that sees the admin URL.
+    build:
+      context: ../..
+      dockerfile: infra/docker/worker.Dockerfile
+    command: ['node', 'dist/pin-cli.js', 'ensure']
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      DATABASE_ADMIN_URL: postgres://ourstream_admin:${POSTGRES_PASSWORD:-ourstream-dev-only}@postgres:5432/ourstream
+      DATABASE_PLATFORM_URL: postgres://ourstream_platform:${PLATFORM_DB_PASSWORD:-ourstream-platform-dev-only}@postgres:5432/ourstream
+    networks: [backend]
+    read_only: true
+    tmpfs: [/tmp]
+    restart: 'no'
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  embeddings:
+    # Self-hosted embedding service (optional profile): Hugging Face text-embeddings-inference (Apache-2.0)
+    # serving Qwen/Qwen3-Embedding-0.6B (Apache-2.0, 1024 dimensions) on its OpenAI-compatible
+    # /v1/embeddings route. The model is downloaded once into the volume on first start (this is the only
+    # service that needs internet, and only for that); then run with EMBED_PROVIDER=qwen-http.
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.8@sha256:8de25e75ce39617f17f2f6c77d60a4f75b65e779ed5005420eb1400072a15c1c
+    profiles: ['embeddings']
+    command:
+      [
+        '--model-id',
+        'Qwen/Qwen3-Embedding-0.6B',
+        '--revision',
+        '97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3',
+        '--port',
+        '80',
+      ]
+    networks: [backend]
+    volumes:
+      - embeddings-cache:/data
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -fsS http://127.0.0.1:80/health >/dev/null']
+      interval: 10s
+      timeout: 5s
+      retries: 60
 
   whisper:
     # Self-hosted ASR sidecar (MIT, ggml-org/whisper.cpp). Only started with `--profile whisper`.
@@ -280,5 +385,8 @@ volumes:
   postgres-data:
   storage-data:
   whisper-models:
+  embeddings-cache:
+  parser-slot:
+  parser-ctl:
   caddy-data:
   caddy-config:

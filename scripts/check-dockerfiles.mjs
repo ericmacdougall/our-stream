@@ -4,7 +4,7 @@
 // up as a failed image build (M1b: the worker gained @our-stream/notifications).
 import { readFileSync } from 'node:fs';
 
-const apps = ['api', 'worker', 'web'];
+const apps = ['api', 'worker', 'web', 'parser'];
 const failures = [];
 
 function workspaceDeps(pkgPath, seen = new Set()) {

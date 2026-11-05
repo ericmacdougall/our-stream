@@ -70,6 +70,19 @@ spec:
               value: /var/tmp/ourstream
             - name: LOG_LEVEL
               value: {{ .Values.worker.logLevel | quote }}
+            # Documents (M2a): the parser sandbox is reached through the shared volume only (no network).
+            - name: PARSER_SLOT_DIR
+              value: /parser-io/slot
+            - name: PARSER_CTL_DIR
+              value: /parser-io/ctl
+            - name: EMBED_PROVIDER
+              value: {{ .Values.worker.embed.provider | quote }}
+            - name: EMBED_MODEL
+              value: {{ .Values.worker.embed.model | quote }}
+            {{- if or .Values.worker.embed.url .Values.embeddings.enabled }}
+            - name: EMBED_URL
+              value: {{ default (printf "http://%s-embeddings:80" (include "our-stream.fullname" .)) .Values.worker.embed.url | quote }}
+            {{- end }}
             {{- include "our-stream.extraEnv" .Values.worker.env | nindent 12 }}
             # Tenant and platform roles plus object storage credentials; no session secrets, no admin URL.
             {{- include "our-stream.secretEnv" (dict "secret" .Values.secrets.app.existingSecret "keys" (list "DATABASE_URL" "DATABASE_PLATFORM_URL" "S3_ACCESS_KEY" "S3_SECRET_KEY") "optional" (list)) | nindent 12 }}
@@ -91,7 +104,20 @@ spec:
               mountPath: /tmp
             - name: scratch
               mountPath: /var/tmp/ourstream
+            {{- if .Values.parser.enabled }}
+            - name: parser-io
+              mountPath: /parser-io/slot
+              subPath: slot
+            - name: parser-io
+              mountPath: /parser-io/ctl
+              subPath: ctl
+            {{- end }}
       volumes:
+        {{- if .Values.parser.enabled }}
+        - name: parser-io
+          persistentVolumeClaim:
+            claimName: {{ include "our-stream.parserIoClaim" . }}
+        {{- end }}
         - name: tmp
           emptyDir: { sizeLimit: 1Gi }
         - name: scratch

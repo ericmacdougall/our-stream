@@ -11,6 +11,9 @@ metadata:
   labels:
     {{- include "our-stream.labels" . | nindent 4 }}
     app.kubernetes.io/component: postgres
+  annotations:
+    # Documents the pgvector release the image must ship (same as compose); the migration enforces >= 0.8.0.
+    our-stream/pgvector-version: {{ $pg.pgvectorVersion | quote }}
 spec:
   instances: {{ $pg.instances }}
   imageName: {{ $pg.imageName | quote }}

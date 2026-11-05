@@ -119,6 +119,16 @@ worker:
   scratch:
     sizeLimit: 16Gi
     medium: ''
+  # Embeddings (M2a, ADR-0008): `fake` is a deterministic, non-semantic stand-in for CI and evaluation (the
+  # worker refuses it when NODE_ENV=production); `qwen-http` calls the Qwen3-Embedding-0.6B service of the
+  # `embeddings` block below (or any OpenAI-compatible /v1/embeddings server at `url`). The model name must
+  # equal the active embedding pin's model (platform.embedding_pin); the policy router refuses any
+  # non-self-hosted embedder under providerPolicy.selfHostOnly and never falls back.
+  embed:
+    provider: fake
+    model: Qwen3-Embedding-0.6B
+    # Defaults to the in-chart embeddings Service when `embeddings.enabled`.
+    url: ''
   env: {}
   resources:
     requests: { cpu: '1', memory: 1Gi }
@@ -127,6 +137,64 @@ worker:
   nodeSelector: {}
   tolerations: []
   affinity: {}
+
+parser:
+  # Document parser sandbox (M2a, docs/documents.md "Parser sandbox"): untrusted files are parsed here and
+  # nowhere else. The pod gets a deny-all ingress AND egress NetworkPolicy (always rendered, independent of
+  # `networkPolicy.enabled`: it is a security boundary, not a skeleton), no ServiceAccount token, no Secret,
+  # a read-only root filesystem, a memory-backed /tmp and a 1 GiB memory limit. The CNI must enforce
+  # NetworkPolicy (kindnet and plain flannel do not); the pod's start-up self-test refuses to attest when an
+  # outbound connection succeeds, and the worker then fails document jobs closed. The kubelet's
+  # `podPidsLimit` is the pid limit (it is not a pod field); set it on the node pool that runs this pod.
+  enabled: true
+  # One job slot per pod and the slot lives on the shared volume: exactly one replica.
+  replicaCount: 1
+  logLevel: info
+  io:
+    # The worker and the parser exchange files through one volume (subPaths `slot` and `ctl`). It must be
+    # mountable by both pods: ReadWriteMany, or ReadWriteOnce with both pods scheduled onto one node (use
+    # worker.affinity and parser.affinity). An empty `existingClaim` makes the chart create the claim.
+    existingClaim: ''
+    storage:
+      size: 2Gi
+      storageClass: ''
+      accessModes: [ReadWriteMany]
+  resources:
+    requests: { cpu: 500m, memory: 512Mi }
+    limits: { memory: 1Gi }
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+embeddings:
+  # Self-hosted embedding service (optional): Hugging Face text-embeddings-inference (Apache-2.0) serving
+  # Qwen/Qwen3-Embedding-0.6B (Apache-2.0, 1024 dimensions) on /v1/embeddings. Needs internet once, to
+  # download the pinned model revision into its cache volume; then set worker.embed.provider=qwen-http.
+  enabled: false
+  image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.8@sha256:8de25e75ce39617f17f2f6c77d60a4f75b65e779ed5005420eb1400072a15c1c
+  model: Qwen/Qwen3-Embedding-0.6B
+  revision: 97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3
+  storage:
+    size: 5Gi
+    storageClass: ''
+  resources:
+    requests: { cpu: '1', memory: 2Gi }
+    limits: { memory: 4Gi }
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+pinIndex:
+  # Post-migrate embedding index job: `node dist/pin-cli.js ensure` from the worker image as a post-install /
+  # post-upgrade hook (after the migrate Job), with the admin URL. CREATE INDEX CONCURRENTLY IF NOT EXISTS for
+  # every pin that is not retired, an INVALID leftover is rebuilt, readiness is reported. Idempotent.
+  enabled: true
+  backoffLimit: 1
+  activeDeadlineSeconds: 3600
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 512Mi }
 
 migrate:
   # Runs `node dist/cli.js migrate` from the api image as a pre-install/pre-upgrade hook with the admin URL
@@ -208,8 +276,10 @@ postgresql:
   cloudnativepg:
     enabled: false
     instances: 1
-    # Must ship the pgvector extension.
+    # Must ship the pgvector extension at the release `pgvectorVersion` (>= 0.8.0, the same release as the
+    # compose image; the migration and the worker check the installed version and fail closed below 0.8.0).
     imageName: ghcr.io/cloudnative-pg/postgresql:17
+    pgvectorVersion: '0.8.7'
     storage:
       size: 20Gi
       storageClass: ''
