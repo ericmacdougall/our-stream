@@ -29,16 +29,17 @@ BEGIN
   RETURN v_id;
 END $$;
 
--- Single use: consumes the link atomically; returns nothing when unknown, expired, already used, or
--- bound to a device and the verifier digest does not match. A refusal never marks the link used, so a
--- spoofed attempt cannot destroy the legitimate link.
+-- Single use: consumes the link atomically; returns nothing when unknown, expired, already used, bound
+-- to a device and the verifier digest does not match (or is missing), or unbound while a verifier is
+-- presented (so a web-requested link cannot be fed to a pending app as a login-fixation link). A refusal
+-- never marks the link used, so a spoofed attempt cannot destroy the legitimate link.
 CREATE FUNCTION platform_magic_link_consume(p_token_hash bytea, p_verifier_hash bytea DEFAULT NULL)
 RETURNS TABLE (user_id uuid, purpose text, org_id uuid) LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, platform AS $$
 BEGIN
   IF p_token_hash IS NULL THEN RAISE EXCEPTION 'platform_magic_link_consume: platform-scope, token required'; END IF;
   RETURN QUERY UPDATE platform.magic_link l SET used_at = now()
    WHERE l.token_hash = p_token_hash AND l.used_at IS NULL AND l.expires_at > now()
-     AND (l.client_challenge IS NULL OR l.client_challenge = p_verifier_hash)
+     AND ((l.client_challenge IS NULL AND p_verifier_hash IS NULL) OR l.client_challenge = p_verifier_hash)
   RETURNING l.user_id, l.purpose, l.org_id;
 END $$;
 

@@ -60,7 +60,11 @@ An invited user signs in through the emailed link and may then choose a password
   verifier's UTF-8 bytes with SHA-256. A bound link is consumed only when that digest equals the stored
   challenge. A missing or wrong verifier is refused with the same `401 invalid_token` as an unknown,
   expired or used token (no hint that the link is bound) and does **not** mark the link used, so a
-  spoofed attempt cannot destroy the legitimate link. Unbound links ignore the verifier.
+  spoofed attempt cannot destroy the legitimate link. The match is required in both directions: an
+  unbound link (requested without `clientChallenge`, i.e. from the web) is consumed only **without** a
+  verifier, and a presented verifier on an unbound link is refused the same way (`401 invalid_token`, link
+  not burned). Otherwise a crafted `ourstream://magic` link carrying an attacker's web-requested token
+  would sign a victim's pending app in as the attacker.
 - Web handoff contract (implemented in `apps/web`, not by the API). `GET ${APP_BASE_URL}/magic?token=<T>&app=1`
   must not consume or post the token anywhere. It shows an "Open in the our-stream app" link to
   `ourstream://magic?token=<T>&server=<origin of the page>` (percent-encode both values; `server` is the

@@ -242,21 +242,40 @@ describe.skipIf(!integrationReady)('auth (integration)', () => {
       expectInvalid(await consume(token, verifier));
     });
 
-    it('stores only the digest; an unbound web link ignores a verifier', async () => {
+    it('stores only the digest (32 bytes), never the verifier', async () => {
       await request({ clientChallenge: challenge });
-      const token = mailedToken();
       const row = await h.admin.query<{ client_challenge: Buffer }>(
         'SELECT client_challenge FROM platform.magic_link WHERE token_hash = $1',
-        [sha256(token)],
+        [sha256(mailedToken())],
       );
       expect(row.rows[0]!.client_challenge.equals(Buffer.from(challenge, 'base64url'))).toBe(true);
       expect(row.rows[0]!.client_challenge.length).toBe(32);
+    });
+
+    it('an unbound web link presented with a verifier is refused (401) and not burned', async () => {
       await request({});
       const unbound = mailedToken();
-      // An unbound (web) link is consumed with or without a verifier, as before.
-      expect((await consume(unbound, verifier)).status).toBe(200);
+      // Login-fixation control: a crafted ourstream:// link carrying a web-requested token must not
+      // sign a pending app in, whatever verifier the app holds.
+      expectInvalid(await consume(unbound, verifier));
+      expectInvalid(await consume(unbound, randomBytes(32).toString('base64url')));
+      const row = await h.admin.query<{ used_at: Date | null }>(
+        'SELECT used_at FROM platform.magic_link WHERE token_hash = $1',
+        [sha256(unbound)],
+      );
+      expect(row.rows[0]!.used_at).toBeNull();
+      // The web flow (no verifier) still works afterwards, exactly once.
+      const ok = await consume(unbound);
+      expect(ok.status).toBe(200);
+      expect((ok.body as { user: { id: string } }).user.id).toBe(owner.userId);
+      expectInvalid(await consume(unbound));
+    });
+
+    it('web flow is unchanged: an unbound link without a verifier signs in once', async () => {
       await request({});
-      expect((await consume(mailedToken())).status).toBe(200);
+      const token = mailedToken();
+      expect((await consume(token)).status).toBe(200);
+      expectInvalid(await consume(token));
     });
 
     it('rejects a malformed clientChallenge or verifier with 400', async () => {
