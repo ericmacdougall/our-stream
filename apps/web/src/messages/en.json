@@ -224,6 +224,10 @@
   "auth.magic.intro": "Press the button to finish signing in.",
   "auth.magic.continue": "Sign in",
   "auth.magic.missing": "This link is missing or incomplete. Request a new one from the sign-in page.",
+  "auth.magic.app.title": "Continue in the our-stream app",
+  "auth.magic.app.intro": "Your sign-in continues in the our-stream app. Press the button to open the app and finish signing in. Nothing is signed in on this page.",
+  "auth.magic.app.open": "Open in the our-stream app",
+  "auth.magic.app.note": "This link only works on the device that requested it, and for the same server. If the app does not open, request a new link from the app.",
 
   "account.title": "Account",
   "account.signedInAs": "Signed in as {name} ({email}).",

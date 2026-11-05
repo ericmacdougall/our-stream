@@ -73,6 +73,13 @@ installed Chrome when the bundled Chromium lacks H.264. Reports land in `playwri
 as `/api` map to `/`). A stale cookie renders the form, so nothing loops. `/magic` is never redirected
 so an invite link for another organisation can still be consumed.
 
+`/magic?token=<T>&app=1` is the link mailed for a sign-in requested by the mobile app. It never calls
+the API (the token stays unconsumed) and renders a handoff page whose "Open in the our-stream app"
+link is `ourstream://magic?token=<T>&server=<page origin>` (origin read after mount; token must match
+`[A-Za-z0-9._~-]{20,200}`, otherwise the invalid-link message shows). There is no auto-redirect and
+the route sends `Referrer-Policy: no-referrer`. Without `app=1` the page consumes on an explicit
+press as before (`src/lib/magic-handoff.ts`, `src/components/auth/MagicHandoff.tsx`).
+
 `/account` shows who is signed in and offers the one-time set-password form for accounts created from
 an invitation (`POST /v1/auth/password`). A 409 `password_set` is shown as a settled outcome. Success
 needs a 2xx; a thrown fetch, an empty-body failure or any 5xx counts as "outcome unknown": the typed

@@ -38,6 +38,11 @@ const nextConfig: NextConfig = {
         ],
       },
       {
+        // The emailed sign-in link carries a one-time token in its query: never leak it in Referer.
+        source: '/magic',
+        headers: [{ key: 'Referrer-Policy', value: 'no-referrer' }],
+      },
+      {
         // The service worker script itself must never be served stale (ADR-0004).
         source: '/sw.js',
         headers: [
