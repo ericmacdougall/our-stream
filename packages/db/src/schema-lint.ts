@@ -12,7 +12,7 @@ export interface LintFinding {
 }
 
 const APP_ALLOWED_PLATFORM_OBJECTS = new Set<string>([]);
-const APP_ALLOWED_FUNCTIONS = new Set([
+export const APP_ALLOWED_FUNCTIONS = new Set([
   'app_org',
   'app_user',
   'next_org_content_epoch',
@@ -45,7 +45,57 @@ const APP_ALLOWED_FUNCTIONS = new Set([
   'platform_account_has_password',
   'record_engagement',
   'event_tags_valid',
+  // M2a (migration 0013): the document gate, the kill-switch read, the active embedding pin (the app role
+  // cannot read the pin table) and the document upload-complete step. Every worker-side function is
+  // platform-only (PLATFORM_ONLY_FUNCTIONS) and must never appear here.
+  'platform_documents_enabled',
+  'platform_documents_kill_switch_engaged',
+  'platform_embedding_active_pin',
+  'document_upload_complete',
 ]);
+
+/**
+ * Functions granted to the platform role only (the worker, the post-migrate jobs and operators). The lint
+ * fails when the app role can execute one, and a unit test fails when one is added to APP_ALLOWED_FUNCTIONS.
+ */
+export const PLATFORM_ONLY_FUNCTIONS: readonly string[] = [
+  // document lifecycle (worker)
+  'platform_document_claim',
+  'platform_document_step',
+  'platform_document_fail',
+  'platform_document_finish',
+  'platform_content_kind',
+  // embeddings (worker)
+  'platform_embedding_upsert',
+  'platform_embedding_missing_hashes',
+  'platform_embedding_reconcile',
+  'platform_embedding_chunk_text',
+  'platform_embedding_coverage',
+  'platform_embedding_gc',
+  'platform_embedding_pin_register',
+  'platform_embedding_pin_ready',
+  'platform_embedding_pin_switch',
+  'platform_embedding_pin_retire',
+  // rollout and rollback (operators)
+  'platform_documents_kill_switch_set',
+  'platform_documents_flag_init_missing',
+  'platform_documents_flag_set_all',
+  'platform_documents_flag_restore_all',
+  'platform_documents_hide',
+  'platform_documents_restore',
+];
+
+/** Internal helpers and trigger functions: executable by nobody but their owner and other definers. */
+export const INTERNAL_ONLY_FUNCTIONS: readonly string[] = [
+  'documents_enabled_unchecked',
+  'document_mark_failed',
+  'chunk_prepare',
+  'embedding_check_pin',
+  'org_documents_flag_changed',
+];
+
+/** Tenant tables the app role may only read (writes go through definer functions). */
+const APP_READ_ONLY_TABLES: readonly string[] = ['embedding'];
 
 export async function lintSchema(
   adminUrl: string,
@@ -227,6 +277,46 @@ export async function lintSchema(
           object: e.proname,
           problem: 'application role can execute a function outside the allow-list',
         });
+      if (
+        PLATFORM_ONLY_FUNCTIONS.includes(e.proname) ||
+        INTERNAL_ONLY_FUNCTIONS.includes(e.proname)
+      )
+        findings.push({
+          object: e.proname,
+          problem: 'application role can execute a platform-only function',
+        });
+    }
+
+    // Platform-only functions must exist and be executable by the platform role.
+    const present = await client.query<{ proname: string; platform_ok: boolean }>(
+      `SELECT p.proname, has_function_privilege('ourstream_platform', p.oid, 'EXECUTE') AS platform_ok
+         FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname = 'public' AND p.proname = ANY($1::text[])`,
+      [[...PLATFORM_ONLY_FUNCTIONS]],
+    );
+    const presentNames = new Set(present.rows.map((r) => r.proname));
+    for (const name of PLATFORM_ONLY_FUNCTIONS) {
+      if (!presentNames.has(name))
+        findings.push({ object: name, problem: 'platform-only function is missing' });
+    }
+    for (const r of present.rows) {
+      if (!r.platform_ok)
+        findings.push({
+          object: r.proname,
+          problem: 'platform role cannot execute a platform-only function',
+        });
+    }
+
+    // Read-only tenant tables: no INSERT, UPDATE, DELETE or TRUNCATE for the app role.
+    for (const t of APP_READ_ONLY_TABLES) {
+      const w = await client.query<{ w: boolean }>(
+        `SELECT (has_table_privilege($1, c.oid, 'INSERT') OR has_table_privilege($1, c.oid, 'UPDATE')
+              OR has_table_privilege($1, c.oid, 'DELETE') OR has_table_privilege($1, c.oid, 'TRUNCATE')) AS w
+           FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname = $2`,
+        [appRole, t],
+      );
+      if (w.rows[0]?.w)
+        findings.push({ object: t, problem: 'application role can write a read-only table' });
     }
   } finally {
     await client.end();
