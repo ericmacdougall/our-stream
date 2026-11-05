@@ -33,6 +33,33 @@ async function openComments(page: Page, id: string) {
   return panel;
 }
 
+test('parent re-renders do not refetch the comment list', async ({ page }) => {
+  const account = uniqueAccount('cmr');
+  await signUp(page, account);
+  const id = await uploadClip(page, 'Refetch clip');
+  await publishToEveryone(page, id);
+  await page.goto('/');
+  const lists: string[] = [];
+  page.on('request', (r) => {
+    if (r.method() === 'GET' && /\/api\/v1\/content\/[^/]+\/comments(\?|$)/.test(r.url())) {
+      lists.push(r.url());
+    }
+  });
+  const panel = await openComments(page, id);
+  await expect(panel.getByText('No comments yet.')).toBeVisible();
+  expect(lists.length).toBe(1);
+  // Posting bumps the comment count in Feed (a parent re-render with a fresh onUnavailable closure).
+  await panel.getByLabel('Write a comment').fill('One');
+  await panel.getByTestId('post-comment').click();
+  await expect(feedItem(page, id).getByTestId('comment-count')).toHaveText('1');
+  await panel.getByLabel('Write a comment').fill('Two');
+  await panel.getByTestId('post-comment').click();
+  await expect(feedItem(page, id).getByTestId('comment-count')).toHaveText('2');
+  await expect(panel.getByTestId('comment')).toHaveCount(2);
+  await page.waitForTimeout(500);
+  expect(lists.length, 'GET /comments requests').toBe(1);
+});
+
 test('post, reply, draft persistence, lost response, report, remove with Escape then confirm', async ({
   page,
 }) => {

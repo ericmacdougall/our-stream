@@ -44,8 +44,8 @@ Signing up with an address that already has an account, including a password-les
 an invite, answers 409 `email_taken`: an unauthenticated request never claims an existing account.
 An invited user signs in through the emailed link and may then choose a password once with
 `POST /v1/auth/password` (`{password}`; 409 `password_set` when one exists). Client note: the web app
-offers this on `/account`; because `Me` carries no "has password" flag, the form is shown to everyone
-and the 409 is presented as a settled outcome. There is no reset endpoint, so a client must never let
+offers this on `/account`; `Me` carries `hasPassword` (M1b), so the form is hidden when it is true and
+shown otherwise (an M1a server has no flag), and the 409 is presented as a settled outcome. There is no reset endpoint, so a client must never let
 a person believe a different password was stored than the one the server kept: after a lost response
 the web app resends the identical value or abandons it with a warning.
 

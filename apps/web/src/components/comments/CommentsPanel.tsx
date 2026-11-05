@@ -314,13 +314,18 @@ export function CommentsPanel({
   const reportInFlight = useRef(false);
   const headingId = `comments-heading-${contentId}`;
 
+  // Held in a ref so `load` stays stable: callers pass a fresh inline closure each render, and a
+  // changing `load` would refetch page 1 and discard "Load more" pages.
+  const unavailableRef = useRef(onUnavailable);
+  unavailableRef.current = onUnavailable;
+
   const load = useCallback(
     async (cursor?: string) => {
       const result = await listComments(contentId, cursor);
       if (!result.ok) {
         if (isUnavailableCode(result.code)) {
           setStatus('unavailable');
-          onUnavailable();
+          unavailableRef.current();
         } else {
           setStatus('error');
           setError(result.message);
@@ -337,7 +342,7 @@ export function CommentsPanel({
       setCanModerate(result.data.canModerate);
       setStatus('ready');
     },
-    [contentId, onUnavailable],
+    [contentId],
   );
 
   useEffect(() => {

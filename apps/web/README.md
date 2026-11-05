@@ -155,7 +155,7 @@ Settings: `/account` holds the email digest preference (daily/off, saved on chan
 one-time set-password form when `MeM1b.hasPassword` is true (an M1a server has no flag, so the form
 stays); `/org/settings` lets owners/admins set the viewing privacy mode, comments on/off and the
 comment scanner policy (retention is read-only, operator-level); a stream's detail page gives its
-moderators/owners a comments switch. Members get a neutral refusal on `/org/settings`.
+owner (or an org admin) a comments switch. Members get a neutral refusal on `/org/settings`.
 
 M1b routes are called only through `src/lib/m1b/api.ts` (one file to edit on a contract change). The
 feed and detail fields they add (`tags`, `pinned`, `likeCount`, `liked`, `commentCount`) are filled
