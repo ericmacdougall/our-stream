@@ -76,3 +76,22 @@ const QUERY_CONTROLS = /[\u0000-\u001F\u007F-\u009F]/g;
 export function normalizeQuery(q: string): string {
   return q.normalize('NFC').replace(QUERY_CONTROLS, ' ').trim().slice(0, 200);
 }
+
+/** Longest document query accepted (the schema answers 400 above it; retrieval uses the same cap). */
+export const DOCUMENT_QUERY_MAX = 2000;
+
+/**
+ * Query hygiene for document search (NEG-7): zero-width, bidi and other format characters (Unicode Cf) are
+ * removed rather than turned into spaces, so "bud\u200Bget" still finds "budget"; NFC so composed and
+ * decomposed accents match each other (stored text is NFC); control characters become spaces; whitespace is
+ * collapsed. Returns the empty string for a query that was only noise. Never logged or stored.
+ */
+export function normalizeDocumentQuery(q: string): string {
+  return q
+    .replace(/\p{Cf}/gu, '')
+    .normalize('NFC')
+    .replace(QUERY_CONTROLS, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, DOCUMENT_QUERY_MAX);
+}

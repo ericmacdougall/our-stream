@@ -92,7 +92,21 @@ export const MemberSummary = z.object({
 });
 
 // ---- content ----
+/** Kinds the feed, media proxy and clip search deal with. Documents never appear in them (M2a). */
 export const ContentKind = z.enum(['clip', 'audio']);
+/** Kinds content can be created with: M2a adds `document` (PDF, DOCX, PPTX, XLSX, CSV, Markdown). */
+export const ContentKindM2a = z.enum(['clip', 'audio', 'document']);
+export const DocumentFormat = z.enum(['pdf', 'docx', 'pptx', 'xlsx', 'csv', 'md']);
+/** M8 owns scanning; until then every document reports `not_run` and the UI says so (AC-9). */
+export const ScanStatus = z.literal('not_run');
+export const DocumentInfo = z.object({
+  format: DocumentFormat,
+  /** Sanitized display name (no control characters or path separators); never used in a storage key. */
+  fileName: z.string(),
+  mimeType: z.string(),
+  size: z.number().int().nonnegative(),
+  scanStatus: ScanStatus,
+});
 export const ContentState = z.enum(['draft', 'published', 'retracted']);
 export const VersionStatus = z.enum([
   'uploaded',
@@ -118,7 +132,7 @@ export const AudienceTarget = z.discriminatedUnion('type', [
   z.object({ type: z.literal('user'), userId: Uuid }),
 ]);
 export const CreateContentRequest = z.object({
-  kind: ContentKind,
+  kind: ContentKindM2a,
   title: z.string().min(1).max(200),
   description: z.string().max(4000).default(''),
   language: z.string().min(2).max(16).default('en'),
@@ -133,7 +147,11 @@ export const PublishRequest = z.object({
 });
 export const UploadInitRequest = z.object({
   fileName: z.string().min(1).max(255),
-  mimeType: z.string().regex(/^(video|audio)\/[a-z0-9.+-]+$/i),
+  /**
+   * Clips and audio accept `video/*` or `audio/*`; documents accept the allow-listed MIME types for the
+   * file extension (docs/api.md). The kind-specific rule is applied by the route, which answers 400.
+   */
+  mimeType: z.string().regex(/^[a-z0-9][a-z0-9.+-]*\/[a-z0-9][a-z0-9.+-]*$/i),
   size: z
     .number()
     .int()
@@ -164,7 +182,7 @@ export const VersionSummary = z.object({
 });
 export const ContentDetail = z.object({
   id: Uuid,
-  kind: ContentKind,
+  kind: ContentKindM2a,
   title: z.string(),
   description: z.string(),
   language: z.string(),

@@ -25,6 +25,7 @@ import { LoggingMailer, createSmtpMailer, type Mailer } from './lib/mailer.js';
 import { createS3Store, type ObjectStore } from './lib/storage.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerContentRoutes } from './routes/content.js';
+import { registerDocumentRoutes } from './routes/documents.js';
 import { registerEngagementRoutes } from './routes/engagement.js';
 import { registerFeedRoutes } from './routes/feed.js';
 import { registerMediaRoutes } from './routes/media.js';
@@ -157,9 +158,9 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
             ? 'internal'
             : rawCode === 'FST_ERR_VALIDATION'
               ? 'validation'
-              : status === 429
+              : status === 429 && !rawCode
                 ? 'rate_limited' // @fastify/rate-limit errors carry no code (click-test finding 1)
-                : (rawCode ?? 'bad_request'),
+                : (rawCode ?? 'bad_request'), // an ApiError keeps its own code, e.g. quota_exceeded
         message: status >= 500 ? 'internal error' : (err as Error).message,
         requestId: String(req.id),
       },
@@ -244,6 +245,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   registerAuthRoutes(app, ctx);
   registerOrgRoutes(app, ctx);
   registerContentRoutes(app, ctx);
+  registerDocumentRoutes(app, ctx);
   registerFeedRoutes(app, ctx);
   registerMediaRoutes(app, ctx);
   registerReactRoutes(app, ctx);

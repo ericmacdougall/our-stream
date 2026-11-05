@@ -53,6 +53,10 @@ export interface Limiters {
   search: FixedWindowLimiter;
   /** Share-as-link attempts, by session id (ADR-0002 oracle stays slow and audited). */
   share: FixedWindowLimiter;
+  /** Document uploads (init), by validated user id: 20 per hour by default. */
+  documentUpload: FixedWindowLimiter;
+  /** Document keyword search and the retrieval route, by validated user id: 60 per minute by default. */
+  documentQuery: FixedWindowLimiter;
 }
 
 export function createLimiters(config: Config): Limiters {
@@ -66,5 +70,10 @@ export function createLimiters(config: Config): Limiters {
     comment: new FixedWindowLimiter({ max: config.COMMENT_RATE_LIMIT_MAX, windowMs }),
     search: new FixedWindowLimiter({ max: config.SEARCH_RATE_LIMIT_MAX, windowMs }),
     share: new FixedWindowLimiter({ max: config.SHARE_RATE_LIMIT_MAX, windowMs }),
+    documentUpload: new FixedWindowLimiter({
+      max: config.DOCUMENT_UPLOADS_PER_USER_HOUR,
+      windowMs: 3_600_000,
+    }),
+    documentQuery: new FixedWindowLimiter({ max: config.DOCUMENT_QUERY_RATE_LIMIT_MAX, windowMs }),
   };
 }

@@ -22,6 +22,7 @@ import { withTenant, type TenantClient } from '@our-stream/db';
 import type { AppContext } from '../context.js';
 import { ADMIN_ROLES, requireMember, requireRole } from '../lib/auth.js';
 import { loadContent, requireAuthor } from '../lib/content.js';
+import { killSwitchEngaged } from '../lib/documents.js';
 import { conflict, forbidden, notFound } from '../lib/errors.js';
 import { audit, requireBudget } from '../lib/m1b-sql.js';
 import { readOrgSettings, writeOrgSettings } from '../lib/settings.js';
@@ -63,7 +64,16 @@ export function registerSettingsRoutes(fastify: FastifyInstance, ctx: AppContext
           Object.entries(req.body).filter(([, v]) => v !== undefined),
         ) as Partial<typeof current>;
         const next = { ...current, ...patch };
-        await writeOrgSettings(client, next);
+        // Rollback window (AC-8): the settings route cannot override the deployment kill switch, so an
+        // admin cannot turn documents on while it is engaged (turning them off is always allowed).
+        if (patch.documentsEnabled === true && (await killSwitchEngaged(client)))
+          throw forbidden(
+            'feature_disabled',
+            'documents are disabled for the whole deployment right now',
+          );
+        await writeOrgSettings(client, next, {
+          withDocumentsFlag: patch.documentsEnabled !== undefined,
+        });
         await audit(client, 'org.settings_updated', {
           changed: Object.keys(patch),
           // Privacy-relevant switches keep their old and new values in the trail (review L7).
@@ -74,6 +84,10 @@ export function registerSettingsRoutes(fastify: FastifyInstance, ctx: AppContext
           commentScanPolicy:
             patch.commentScanPolicy !== undefined
               ? { from: current.commentScanPolicy, to: next.commentScanPolicy }
+              : undefined,
+          documentsEnabled:
+            patch.documentsEnabled !== undefined
+              ? { from: current.documentsEnabled, to: next.documentsEnabled }
               : undefined,
         });
         return next;

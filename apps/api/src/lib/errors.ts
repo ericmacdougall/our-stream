@@ -38,6 +38,12 @@ export function fromDbError(err: unknown): unknown {
   if (code === '23505') return new ApiError(409, 'conflict', 'already exists');
   if (message.includes('expires_at must be after publish_at'))
     return badRequest('bad_expiry', 'expiresAt must be after publishAt');
+  // Migration 0013 raises `content_publish: feature_disabled: ...` for a document while the org flag or
+  // the deployment kill switch is off.
+  if (message.includes('feature_disabled'))
+    return forbidden('feature_disabled', 'documents are not enabled for this organisation');
+  if (message.includes('not awaiting upload'))
+    return conflict('already_completed', 'this upload was already completed');
   if (message.includes('content not found or retracted'))
     return conflict('retracted', 'content is retracted');
   if (message.includes('already retracted')) return conflict('retracted', 'already retracted');

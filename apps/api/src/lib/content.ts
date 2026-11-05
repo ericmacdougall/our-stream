@@ -5,6 +5,7 @@ import { authorAccessibleSql, readerVisibleSql } from '@our-stream/authz';
 import type { TenantClient } from '@our-stream/db';
 import type { z } from 'zod';
 import type { AudienceTarget, ContentDetailM1b } from '@our-stream/contracts';
+import { formatOfName } from './documents.js';
 import { notFound } from './errors.js';
 import { feedMedia } from './media.js';
 import {
@@ -20,7 +21,7 @@ type Target = z.infer<typeof AudienceTarget>;
 
 interface Row {
   id: string;
-  kind: 'clip' | 'audio';
+  kind: 'clip' | 'audio' | 'document';
   title: string;
   description: string;
   language: string;
@@ -39,6 +40,9 @@ interface Row {
   v_status: 'uploaded' | 'processing' | 'current' | 'superseded' | 'retracted' | 'failed';
   processing_step: string | null;
   processing_error: string | null;
+  original_name: string | null;
+  original_size: string | null;
+  mime_type: string | null;
   duration_ms: number | null;
   width: number | null;
   height: number | null;
@@ -109,7 +113,7 @@ export async function loadContent(client: TenantClient, contentId: string): Prom
     `SELECT c.id, c.kind, c.title, c.description, c.language, c.links, c.chapters, c.state, c.publish_at, c.expires_at,
             c.retracted_at, c.owner_id, c.content_epoch::text, c.current_version_id, c.media_key_id,
             a.display_name AS owner_name,
-            v.id AS v_id, v.status AS v_status, v.processing_step, v.processing_error, v.duration_ms, v.width, v.height, v.assets,
+            v.id AS v_id, v.status AS v_status, v.processing_step, v.processing_error, v.original_name, v.original_size::text, v.mime_type, v.duration_ms, v.width, v.height, v.assets,
             ${authorAccessibleSql({ org: '$1', user: '$2' })} AS can_edit,
             ${readerVisibleSql({ org: '$1', user: '$2' })} AS visible,
             c.event_tags AS tags, ${pinnedSql('c', '$2')} AS pinned, ${likeCountSql('c')} AS like_count,
@@ -136,6 +140,7 @@ export async function loadContent(client: TenantClient, contentId: string): Prom
       )
     : [];
   const showVersion = row.v_id !== null && (row.can_edit || row.v_id === row.current_version_id);
+  const docFormat = row.kind === 'document' ? formatOfName(row.original_name ?? '') : null;
   const detail: Detail = {
     id: row.id,
     kind: row.kind,
@@ -161,6 +166,17 @@ export async function loadContent(client: TenantClient, contentId: string): Prom
           hasCaptions: hasCaptions(row.assets),
         }
       : null,
+    ...(showVersion && docFormat
+      ? {
+          document: {
+            format: docFormat,
+            fileName: row.original_name!,
+            mimeType: row.mime_type ?? '',
+            size: Number(row.original_size ?? 0),
+            scanStatus: 'not_run' as const,
+          },
+        }
+      : {}),
     audience,
     canEdit: row.can_edit,
     contentEpoch: Number(row.content_epoch),

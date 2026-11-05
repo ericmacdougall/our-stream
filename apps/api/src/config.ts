@@ -69,6 +69,30 @@ const Env = z.object({
   COMMENT_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(10),
   SEARCH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(60),
   SHARE_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(20),
+
+  // M2a documents (owner-chosen defaults, not user-sourced; docs/documents.md). Limits are per process.
+  // Value written into org.settings.documents_enabled when an org is created (compose sets true for
+  // self-host; every other install defaults to off). An org without the key is off (fail closed).
+  DOCUMENTS_ENABLED_DEFAULT: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+  DOCUMENT_MAX_BYTES: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .default(100 * 1024 * 1024),
+  DOCUMENT_UPLOADS_PER_USER_HOUR: z.coerce.number().int().min(1).default(20),
+  DOCUMENT_ORG_QUOTA_BYTES: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .default(5 * 1024 * 1024 * 1024),
+  /** Keyword search over documents and retrieval share this per-user budget (60 per minute). */
+  DOCUMENT_QUERY_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(60),
+  /** Concurrent original downloads streamed by this process, overall and per user. */
+  DOCUMENT_DOWNLOAD_CONCURRENCY: z.coerce.number().int().min(1).default(32),
+  DOCUMENT_DOWNLOAD_CONCURRENCY_PER_USER: z.coerce.number().int().min(1).default(4),
 });
 
 export type Config = z.infer<typeof Env>;

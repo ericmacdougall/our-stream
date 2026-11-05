@@ -10,11 +10,17 @@ import { buildApp } from './app.js';
 import { loadConfig, type Config } from './config.js';
 import { FakeMailer } from './lib/mailer.js';
 import { createS3Store, derivedPrefix, type ObjectStore } from './lib/storage.js';
+import { MemoryStore } from './test-memory-store.js';
 
 export const adminUrl = process.env['DATABASE_ADMIN_URL'];
 export const appUrl = process.env['DATABASE_URL'];
 export const s3Endpoint = process.env['S3_ENDPOINT'];
-export const integrationReady = Boolean(adminUrl && appUrl && s3Endpoint);
+/**
+ * `TEST_STORE=memory` swaps SeaweedFS for the in-process store (test-memory-store.ts) so the suites run
+ * where no container can be started; CI keeps using the real S3 endpoint.
+ */
+export const memoryStore = process.env['TEST_STORE'] === 'memory';
+export const integrationReady = Boolean(adminUrl && appUrl && (s3Endpoint || memoryStore));
 
 export interface Session {
   cookie: string;
@@ -78,8 +84,10 @@ function tokenFromLink(text: string): string {
 export async function createHarness(
   suffix: string,
   overrides: Partial<Record<string, string>> = {},
+  opts: { store?: ObjectStore } = {},
 ): Promise<Harness> {
-  if (!adminUrl || !appUrl || !s3Endpoint) throw new Error('integration env missing');
+  if (!adminUrl || !appUrl || !(s3Endpoint || memoryStore || opts.store))
+    throw new Error('integration env missing');
   await runMigrations(adminUrl);
   const admin = new pg.Client({ connectionString: adminUrl });
   await admin.connect();
@@ -90,14 +98,24 @@ export async function createHarness(
     LOG_LEVEL: 'error',
     DATABASE_URL: appUrl,
     APP_BASE_URL: 'http://localhost:3000',
-    S3_ENDPOINT: s3Endpoint,
+    S3_ENDPOINT: s3Endpoint ?? 'http://127.0.0.1:1',
     S3_BUCKET: process.env['S3_BUCKET'] ?? 'ourstream-test',
     S3_ACCESS_KEY: process.env['S3_ACCESS_KEY'] ?? 'ourstream-dev',
     S3_SECRET_KEY: process.env['S3_SECRET_KEY'] ?? 'ourstream-dev-secret-only',
     AUTH_RATE_LIMIT_MAX: '10000',
     ...overrides,
   });
-  const store = createS3Store(config);
+  let ownMemory: MemoryStore | null = null;
+  let store: ObjectStore;
+  if (opts.store) {
+    store = opts.store;
+  } else if (memoryStore) {
+    ownMemory = new MemoryStore();
+    await ownMemory.start();
+    store = ownMemory;
+  } else {
+    store = createS3Store(config);
+  }
   await store.ensureBucket();
   const logs: string[] = [];
   const logSink = {
@@ -221,7 +239,7 @@ export async function createHarness(
 
   const seedHls: Harness['seedHls'] = async (orgId, contentId, versionId) => {
     const prefix = derivedPrefix(orgId, contentId, versionId);
-    const storageUrl = `${s3Endpoint}/${config.S3_BUCKET}/${prefix}hls/1080p/index.m3u8`;
+    const storageUrl = `${s3Endpoint ?? 'http://memory.invalid'}/${config.S3_BUCKET}/${prefix}hls/1080p/index.m3u8`;
     const master = [
       '#EXTM3U',
       '#EXT-X-VERSION:7',
@@ -273,6 +291,7 @@ export async function createHarness(
     await app.close();
     await pool.end();
     await admin.end();
+    await ownMemory?.stop();
   };
 
   return {
@@ -318,7 +337,11 @@ export async function seedFixtureOrg(
 ): Promise<void> {
   const admin = h.admin;
   await admin.query(`SELECT set_config('app.org_id', $1, false)`, [org.orgId]);
-  await admin.query('INSERT INTO org (id, slug, name) VALUES ($1, $2, $2)', [org.orgId, org.slug]);
+  await admin.query('INSERT INTO org (id, slug, name, settings) VALUES ($1, $2, $2, $3::jsonb)', [
+    org.orgId,
+    org.slug,
+    JSON.stringify({ documents_enabled: org.documentsEnabled }),
+  ]);
   for (const m of org.memberships)
     await admin.query(
       'INSERT INTO org_membership (org_id, user_id, role, status) VALUES ($1, $2, $3, $4)',
@@ -343,7 +366,7 @@ export async function seedFixtureOrg(
   for (const c of org.content) {
     await admin.query(
       `INSERT INTO content (org_id, id, kind, owner_id, title, state, publish_at, expires_at, retracted_at, review_requested)
-       VALUES ($1, $2, 'clip', $3, $4, $5, $6, $7, $8, $9)`,
+       VALUES ($1, $2, $10::content_kind, $3, $4, $5, $6, $7, $8, $9)`,
       [
         org.orgId,
         c.id,
@@ -354,8 +377,36 @@ export async function seedFixtureOrg(
         c.expiresAt,
         c.retractedAt,
         c.reviewRequested,
+        c.kind,
       ],
     );
+    if (c.kind === 'document') {
+      // A document fixture: a version in the stated status with an original and, whatever its status, three
+      // chunks of searchable text (retrieval and search must not be fooled by chunks of a hidden version).
+      if (c.currentVersionStatus === null) continue; // a document without any version row
+      const v = await admin.query<{ id: string }>(
+        `INSERT INTO content_version (org_id, content_id, status, original_key, original_name, original_size, mime_type, processing_step)
+         VALUES ($1, $2, $3, $4, 'fixture.pdf', 1234, 'application/pdf', 'done') RETURNING id`,
+        [org.orgId, c.id, c.currentVersionStatus, `orgs/${org.orgId}/fixture/${c.id}`],
+      );
+      await admin.query(
+        'UPDATE content SET current_version_id = $3 WHERE org_id = $1 AND id = $2',
+        [org.orgId, c.id, v.rows[0]!.id],
+      );
+      for (let i = 0; i < 3; i += 1)
+        await admin.query(
+          `INSERT INTO chunk (org_id, content_version_id, content_id, locator, text, ordinal) VALUES ($1, $2, $3, $4::jsonb, $5, $6)`,
+          [
+            org.orgId,
+            v.rows[0]!.id,
+            c.id,
+            JSON.stringify({ page: i + 1 }),
+            `fixture onboarding policy page ${i + 1} of ${c.id.slice(0, 8)}`,
+            i + 1,
+          ],
+        );
+      continue;
+    }
     const v = await admin.query<{ id: string }>(
       `INSERT INTO content_version (org_id, content_id, status, assets, transcript) VALUES ($1, $2, $3, $4::jsonb, $5::jsonb) RETURNING id`,
       [

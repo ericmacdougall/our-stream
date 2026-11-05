@@ -2,6 +2,7 @@
 // Org settings live in org.settings (jsonb). The API reads the keys it owns with defaults and writes
 // them back by merging per top-level key, so keys owned by other components (for example
 // notify.include_title_after_access_loss, read by the worker) survive every PATCH (review F15).
+import type pg from 'pg';
 import type { TenantClient } from '@our-stream/db';
 import type { z } from 'zod';
 import type { OrgSettings } from '@our-stream/contracts';
@@ -13,6 +14,7 @@ export const DEFAULT_SETTINGS: Settings = {
   commentsEnabled: true, // decision Q7
   engagementRetentionDays: 395, // decision Q12: 13 months
   commentScanPolicy: 'off', // ADR-0009
+  documentsEnabled: false, // M2a: an absent key is off (fail closed)
 };
 
 const PRIVACY = new Set(['aggregate_only', 'named', 'identified_for_required_only']);
@@ -24,6 +26,7 @@ export function settingsFromRaw(raw: unknown): Settings {
     comments?: { enabled?: unknown };
     engagement?: { retention_days?: unknown };
     scan?: { comments?: unknown };
+    documents_enabled?: unknown;
   };
   const privacy = r.privacy?.viewers;
   const scan = r.scan?.comments;
@@ -42,16 +45,23 @@ export function settingsFromRaw(raw: unknown): Settings {
       typeof scan === 'string' && SCAN.has(scan)
         ? (scan as Settings['commentScanPolicy'])
         : DEFAULT_SETTINGS.commentScanPolicy,
+    // The database reads the key as text (`settings ->> 'documents_enabled' = 'true'`), so a JSON boolean
+    // true and the string 'true' count and nothing else does.
+    documentsEnabled: r.documents_enabled === true || r.documents_enabled === 'true',
   };
 }
 
-/** The jsonb fragment to merge for the keys this API owns. */
-export function settingsToRaw(s: Settings): Record<string, unknown> {
+/**
+ * The jsonb fragment to merge for the keys this API owns. `documents_enabled` is written only when asked
+ * (`withDocumentsFlag`): an unrelated PATCH must not turn an absent key into an explicit one.
+ */
+export function settingsToRaw(s: Settings, withDocumentsFlag = false): Record<string, unknown> {
   return {
     privacy: { viewers: s.privacyMode },
     comments: { enabled: s.commentsEnabled },
     engagement: { retention_days: s.engagementRetentionDays },
     scan: { comments: s.commentScanPolicy },
+    ...(withDocumentsFlag ? { documents_enabled: s.documentsEnabled } : {}),
   };
 }
 
@@ -63,11 +73,37 @@ export async function readOrgSettings(client: TenantClient, lock = false): Promi
   return settingsFromRaw(r.rows[0]?.settings);
 }
 
-export async function writeOrgSettings(client: TenantClient, next: Settings): Promise<void> {
+export async function writeOrgSettings(
+  client: TenantClient,
+  next: Settings,
+  opts: { withDocumentsFlag?: boolean } = {},
+): Promise<void> {
   await client.query(`UPDATE org SET settings = settings || $2::jsonb WHERE id = $1`, [
     client.tenant.orgId,
-    JSON.stringify(settingsToRaw(next)),
+    JSON.stringify(settingsToRaw(next, opts.withDocumentsFlag === true)),
   ]);
+}
+
+/**
+ * Writes the deployment default of `documents_enabled` for a freshly created org inside the creating
+ * transaction (a crash cannot leave an org without the key). The app role cannot read other orgs, so the
+ * tenant context is set for this transaction only; the platform function that backfills older orgs is
+ * platform-role only (worker). Goes through the same `org.settings` merge as the settings route.
+ */
+export async function initDocumentsFlag(
+  client: Pick<pg.PoolClient, 'query'>,
+  orgId: string,
+  enabled: boolean,
+): Promise<void> {
+  await client.query(`SELECT set_config('app.org_id', $1, true)`, [orgId]);
+  try {
+    await client.query(`UPDATE org SET settings = settings || $2::jsonb WHERE id = $1`, [
+      orgId,
+      JSON.stringify({ documents_enabled: enabled }),
+    ]);
+  } finally {
+    await client.query(`SELECT set_config('app.org_id', '', true)`);
+  }
 }
 
 /** `viewers` lists appear only under `named`; `identified_for_required_only` is aggregate until M4. */

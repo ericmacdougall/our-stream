@@ -45,6 +45,7 @@ import {
   withPlatform,
   type MembershipRow,
 } from '../lib/platform.js';
+import { initDocumentsFlag } from '../lib/settings.js';
 import { newSessionToken, sha256 } from '../lib/tokens.js';
 
 // OWASP Password Storage Cheat Sheet (argon2id: m=19 MiB, t=2, p=1) as the minimum configuration.
@@ -177,6 +178,8 @@ export function registerAuthRoutes(fastify: FastifyInstance, ctx: AppContext): v
             throw conflict('slug_taken', 'this organisation slug is taken');
           throw err;
         }
+        // Deployment default for the documents flag, written in the same transaction as the org.
+        await initDocumentsFlag(client, orgId, ctx.config.DOCUMENTS_ENABLED_DEFAULT);
         const sessionId = await sessionCreate(
           client,
           userId,

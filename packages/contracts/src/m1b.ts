@@ -15,6 +15,7 @@ import { z } from 'zod';
 import {
   ContentDetail,
   ContentKind,
+  DocumentInfo,
   FeedItem,
   FeedQuery,
   FeedResponse,
@@ -206,6 +207,12 @@ export const OrgSettings = z.object({
   engagementRetentionDays: z.number().int().min(30).max(3650),
   /** ADR-0009 comment scanner: `off` (default), `warn` (findings logged), `block` (400 `comment_blocked`). */
   commentScanPolicy: CommentScanPolicy,
+  /**
+   * M2a: documents (upload, viewer, download, keyword search, retrieval) are on for this org. Only an
+   * owner or admin can change it; turning it on is refused (403 `feature_disabled`) while the deployment
+   * kill switch is engaged. Stored as the top-level `documents_enabled` key; an absent key reads as false.
+   */
+  documentsEnabled: z.boolean(),
 });
 export const UpdateOrgSettingsRequest = OrgSettings.partial();
 export const UpdateStreamRequest = z.object({ commentsEnabled: z.boolean().optional() });
@@ -246,6 +253,8 @@ export const FeedItemM1b = FeedItem.extend({
 });
 export const FeedResponseM1b = FeedResponse.extend({ items: z.array(FeedItemM1b) });
 export const ContentDetailM1b = ContentDetail.extend({
+  /** Present only for `kind: 'document'` (name, format, size, `scanStatus: 'not_run'`). */
+  document: DocumentInfo.optional(),
   tags: z.array(EventTag),
   pinned: z.boolean(),
   likeCount: Count,
