@@ -28,7 +28,10 @@
     "onlyBuiltDependencies": [
       "argon2",
       "esbuild"
-    ]
+    ],
+    "overrides": {
+      "unzipper": "0.12.5"
+    }
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

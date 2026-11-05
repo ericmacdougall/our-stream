@@ -32,7 +32,12 @@ const allowed = new Set([
   '(MPL-2.0 OR Apache-2.0)',
   '(AFL-2.1 OR BSD-3-Clause)',
   '(WTFPL OR MIT)',
+  // jszip (mammoth, exceljs) is dual-licensed; we elect the MIT terms.
+  '(MIT OR GPL-3.0-or-later)',
 ]);
+// Packages whose manifest declares a vague identifier but whose shipped LICENSE text was read and is
+// allow-listed: duck@0.1.12 (mammoth) declares "BSD" and ships the BSD 2-clause text.
+const reviewedPackages = new Set(['duck@0.1.12']);
 const denied = /SSPL|BUSL|Elastic|FSL|RSAL|Commons-Clause|CC-BY-NC|Proprietary|UNLICENSED/i;
 
 const raw = execSync('pnpm licenses list --json --prod', {
@@ -44,7 +49,8 @@ const problems = [];
 for (const [license, pkgs] of Object.entries(data)) {
   const names = pkgs.map((p) => `${p.name}@${p.versions?.join('/') ?? p.version ?? ''}`);
   if (denied.test(license)) problems.push(`DENIED ${license}: ${names.join(', ')}`);
-  else if (!allowed.has(license)) problems.push(`REVIEW ${license}: ${names.join(', ')}`);
+  else if (!allowed.has(license) && !names.every((n) => reviewedPackages.has(n)))
+    problems.push(`REVIEW ${license}: ${names.join(', ')}`);
 }
 if (problems.length > 0) {
   console.error(problems.join('\n'));
