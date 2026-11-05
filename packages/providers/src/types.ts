@@ -52,6 +52,42 @@ export interface AsrProvider {
   transcribe(input: TranscribeInput): Promise<Transcript>;
 }
 
+/** Vector dimension of every embedding pin in M2a (the `embedding.vector` column is `vector(1024)`). */
+export const EMBED_DIMS = 1024;
+/** Model of the default embedding pin (platform.embedding_pin, migration 0013). */
+export const DEFAULT_EMBED_MODEL = 'Qwen3-Embedding-0.6B';
+
+export interface EmbedInput {
+  texts: string[];
+  /** `query` texts get the model's retrieval instruction prefix; `document` texts are embedded as they are. */
+  kind?: 'document' | 'query';
+}
+
+export interface EmbedProvider {
+  readonly descriptor: ProviderDescriptor;
+  /** The pin model this provider produces vectors for (matched against platform.embedding_pin.model). */
+  readonly model: string;
+  readonly dims: number;
+  /** One vector per input text, in order; never a zero vector, always `dims` finite numbers. */
+  embed(input: EmbedInput): Promise<number[][]>;
+}
+
+export type EmbedErrorCode = 'upstream' | 'timeout' | 'bad_response' | 'dims' | 'zero_vector';
+
+/**
+ * Embedding failure. The message is fixed per code and carries nothing from the request or from the
+ * upstream body (a server may echo its input in an error): NEG-10.
+ */
+export class EmbedError extends Error {
+  constructor(
+    public readonly code: EmbedErrorCode,
+    public readonly status?: number,
+  ) {
+    super(`embed failed: ${code}${status === undefined ? '' : ` (http ${status})`}`);
+    this.name = 'EmbedError';
+  }
+}
+
 /** Org model policy (ADR-0008 §3). `allowTrainingUse` is fixed to false and not configurable. */
 export interface OrgModelPolicy {
   selfHostOnly: boolean;

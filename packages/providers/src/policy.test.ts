@@ -5,6 +5,8 @@ import { checkPolicy, selectProvider } from './policy.js';
 import { ProviderPolicyError, type OrgModelPolicy, type ProviderDescriptor } from './types.js';
 import { fakeAsrDescriptor } from './asr/fake.js';
 import { whisperHttpDescriptor } from './asr/whisper-http.js';
+import { fakeEmbedDescriptor } from './embed/fake.js';
+import { qwenHttpDescriptor } from './embed/qwen-http.js';
 
 const base: Omit<ProviderDescriptor, 'id' | 'retentionClass' | 'trainingUse'> = {
   vendor: 'acme',
@@ -97,5 +99,63 @@ describe('selectProvider', () => {
   });
   it('refuses when nothing is configured', () => {
     expect(() => selectProvider(open, [], 'asr')).toThrow(/no asr provider/);
+  });
+});
+
+describe('embed capability (NEG-8)', () => {
+  const hosted = (
+    id: string,
+    retentionClass: ProviderDescriptor['retentionClass'],
+    trainingUse: ProviderDescriptor['trainingUse'],
+  ): ProviderDescriptor => ({
+    ...base,
+    id,
+    capability: 'embed',
+    retentionClass,
+    trainingUse,
+  });
+  const hostedZdr = hosted('hosted-zdr', 'zdr_contractual', 'never');
+  const hostedRetained = hosted('hosted-retained', 'default_retention', 'opt_out');
+  const hostedTrains = hosted('hosted-trains', 'trains_by_default', 'default_on');
+  const table: [string, OrgModelPolicy, ProviderDescriptor, string | true][] = [
+    ['sovereign/fake', sovereign, fakeEmbedDescriptor, true],
+    ['sovereign/qwen-http', sovereign, qwenHttpDescriptor, true],
+    ['sovereign+zdr/qwen-http', sovereignZdr, qwenHttpDescriptor, true],
+    ['sovereign/hosted zdr', sovereign, hostedZdr, 'not_self_hosted'],
+    ['sovereign/hosted retained', sovereign, hostedRetained, 'not_self_hosted'],
+    ['sovereign/hosted trains', sovereign, hostedTrains, 'training_use'],
+    ['zdr/hosted zdr', zdrOnly, hostedZdr, true],
+    ['zdr/hosted retained', zdrOnly, hostedRetained, 'retention_not_zdr'],
+    ['open/hosted retained', open, hostedRetained, true],
+    ['open/hosted trains', open, hostedTrains, 'training_use'],
+    ['an asr provider is not an embedder', sovereign, selfHosted, 'wrong_capability'],
+    [
+      'allowed vendors exclude',
+      { ...sovereign, allowedVendors: ['other'] },
+      qwenHttpDescriptor,
+      'vendor_not_allowed',
+    ],
+  ];
+  expect(table.length).toBeGreaterThan(0);
+  it.each(table)('%s', (_name, policy, descriptor, expected) => {
+    const d = checkPolicy(policy, descriptor, 'embed');
+    if (expected === true) expect(d).toEqual({ allowed: true });
+    else expect(d).toEqual({ allowed: false, reason: expected });
+  });
+
+  it('the default policy (selfHostOnly) refuses a hosted embedder and never falls back', () => {
+    const p = (d: ProviderDescriptor) => ({ descriptor: d });
+    expect(() => selectProvider(sovereignZdr, [p(hostedZdr)], 'embed')).toThrow(
+      ProviderPolicyError,
+    );
+    try {
+      selectProvider(sovereignZdr, [p(hostedZdr)], 'embed');
+    } catch (err) {
+      expect((err as ProviderPolicyError).reason).toBe('not_self_hosted');
+      expect((err as ProviderPolicyError).providerId).toBe('hosted-zdr');
+    }
+    expect(selectProvider(sovereignZdr, [p(qwenHttpDescriptor)], 'embed').descriptor.id).toBe(
+      'embed-qwen-http',
+    );
   });
 });

@@ -2,6 +2,9 @@
 export type {
   AsrProvider,
   Capability,
+  EmbedErrorCode,
+  EmbedInput,
+  EmbedProvider,
   OrgModelPolicy,
   PolicyRefusalReason,
   ProviderDescriptor,
@@ -11,7 +14,7 @@ export type {
   TranscriptSegment,
   TranscribeInput,
 } from './types.js';
-export { ProviderPolicyError } from './types.js';
+export { DEFAULT_EMBED_MODEL, EMBED_DIMS, EmbedError, ProviderPolicyError } from './types.js';
 export { checkPolicy, selectProvider, type PolicyDecision } from './policy.js';
 export { createFakeAsr, fakeAsrDescriptor, fakeSegments, wavDurationMs } from './asr/fake.js';
 export {
@@ -20,3 +23,16 @@ export {
   type WhisperHttpOptions,
 } from './asr/whisper-http.js';
 export { createAsrProviderFromEnv, type AsrProviderName } from './asr/from-env.js';
+export {
+  createFakeEmbed,
+  fakeEmbedDescriptor,
+  fakeVector,
+  type FakeEmbedOptions,
+} from './embed/fake.js';
+export {
+  QUERY_INSTRUCTION,
+  createQwenHttpEmbed,
+  qwenHttpDescriptor,
+  type QwenHttpOptions,
+} from './embed/qwen-http.js';
+export { createEmbedProviderFromEnv, type EmbedProviderName } from './embed/from-env.js';
