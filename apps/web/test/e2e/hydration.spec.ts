@@ -50,4 +50,37 @@ test.describe('time zone and locale differ from the server', () => {
     }
     expect(problems.filter((p) => HYDRATION.test(p))).toEqual([]);
   });
+
+  // suppressHydrationWarning silences the console but keeps the server's text, so also assert what
+  // the user sees: browser zone and locale, never the server's UTC/en text. Failed on a2634b0.
+  test('visible dates, schedule hint and datetime-local value use the browser zone', async ({
+    page,
+  }) => {
+    await signUp(page, uniqueAccount('hydv'));
+    const id = await uploadClip(page, 'Visible zone clip');
+
+    await page.goto(`/content/${id}/publish`);
+    await page.getByLabel('Everyone in the organisation').check();
+    await page.getByRole('radio', { name: 'Schedule' }).check();
+    await page.locator('#publishAt').fill('2030-01-15T09:30');
+    await page.getByRole('button', { name: 'Schedule', exact: true }).click();
+    await page.waitForURL((u) => u.pathname === `/content/${id}`);
+
+    // Reopening the form: the controlled input must hold the same local wall time, not a shifted one.
+    await page.goto(`/content/${id}/publish`);
+    await page.waitForLoadState('networkidle');
+    await expect(page.locator('#publishAt')).toHaveValue('2030-01-15T09:30');
+    await expect(page.locator('#publishAt-hint')).toContainText('Pacific/Auckland');
+
+    await page.goto(`/content/${id}`);
+    await page.waitForLoadState('networkidle');
+    const expected = await page.evaluate(() =>
+      new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(
+        new Date(2030, 0, 15, 9, 30),
+      ),
+    );
+    expect(expected).toMatch(/2030/);
+    await expect(page.getByTestId('content-meta')).toContainText(expected);
+    await expect(page.getByTestId('content-meta')).not.toContainText(' UTC');
+  });
 });

@@ -4,7 +4,8 @@
 // request; controls are disabled while pending. publishAt/expiresAt are entered in the viewer's
 // zone (datetime-local) and sent as ISO-8601 UTC.
 import { useRouter } from 'next/navigation';
-import { useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useMounted } from '@/lib/useMounted';
 import type { z } from 'zod';
 import type { AudienceTarget, ContentDetail, MemberSummary, Stream } from '@our-stream/contracts';
 import { browserApi } from '@/lib/api/client';
@@ -60,12 +61,15 @@ export function PublishForm({
     existing.flatMap((a) => (a.type === 'group' ? [a.groupId] : [])).join('\n'),
   );
   const [mode, setMode] = useState<'now' | 'schedule'>(content.publishAt ? 'schedule' : 'now');
-  const [publishAtLocal, setPublishAtLocal] = useState(
-    content.publishAt ? isoToLocalDateTime(content.publishAt) : '',
-  );
-  const [expiresLocal, setExpiresLocal] = useState(
-    content.expiresAt ? isoToLocalDateTime(content.expiresAt) : '',
-  );
+  // Local date-times depend on the browser zone, so they are filled after mount, never from the
+  // server render (the server zone would otherwise shift a re-saved schedule).
+  const mounted = useMounted();
+  const [publishAtLocal, setPublishAtLocal] = useState('');
+  const [expiresLocal, setExpiresLocal] = useState('');
+  useEffect(() => {
+    if (content.publishAt) setPublishAtLocal(isoToLocalDateTime(content.publishAt));
+    if (content.expiresAt) setExpiresLocal(isoToLocalDateTime(content.expiresAt));
+  }, [content.publishAt, content.expiresAt]);
   const [pending, setPending] = useState(false);
   // Once the publish request succeeded the form is never resubmittable: a second POST would
   // re-publish (publish_at bumped, audience notified again). Later steps navigate away instead.
@@ -294,8 +298,10 @@ export function PublishForm({
               aria-describedby="publishAt-hint"
               onChange={(e) => setPublishAtLocal(e.target.value)}
             />
-            <small id="publishAt-hint" className="muted" suppressHydrationWarning>
-              {t('publish.zoneHint', { zone: Intl.DateTimeFormat().resolvedOptions().timeZone })}
+            <small id="publishAt-hint" className="muted">
+              {t('publish.zoneHint', {
+                zone: mounted ? Intl.DateTimeFormat().resolvedOptions().timeZone : 'UTC',
+              })}
             </small>
           </div>
         ) : null}

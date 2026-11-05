@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
 import Link from 'next/link';
+import { useMounted } from '@/lib/useMounted';
 import { useRouter } from 'next/navigation';
 import { useRef, useState } from 'react';
 import type { z } from 'zod';
@@ -57,7 +58,14 @@ export function ContentPanel({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [replacing, setReplacing] = useState(false);
-  const formatter = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  const mounted = useMounted();
+  // Server and first client render use UTC with an explicit label; the browser zone replaces it after mount.
+  const formatter = new Intl.DateTimeFormat(mounted ? undefined : 'en-GB', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    ...(mounted ? {} : { timeZone: 'UTC' }),
+  });
+  const fmt = (iso: string) => formatter.format(new Date(iso)) + (mounted ? '' : ' UTC');
 
   async function retract() {
     if (inFlight.current) return;
@@ -94,18 +102,14 @@ export function ContentPanel({
     <>
       <header className="masthead">
         <h1>{detail.title}</h1>
-        {/* Dates are formatted in the viewer's time zone and locale, which differ from the server's. */}
-        <p className="muted" suppressHydrationWarning>
+        {/* UTC until mounted, then the viewer's zone and locale (see useMounted). */}
+        <p className="muted" data-testid="content-meta">
           {t('content.byOwner', { name: detail.owner.displayName })} ·{' '}
           <span data-testid="content-state">{t(STATE_LABEL[detail.state])}</span>
-          {detail.publishAt
-            ? ` · ${t('content.publishAt', { when: formatter.format(new Date(detail.publishAt)) })}`
-            : ''}
-          {detail.expiresAt
-            ? ` · ${t('content.expiresAt', { when: formatter.format(new Date(detail.expiresAt)) })}`
-            : ''}
+          {detail.publishAt ? ` · ${t('content.publishAt', { when: fmt(detail.publishAt) })}` : ''}
+          {detail.expiresAt ? ` · ${t('content.expiresAt', { when: fmt(detail.expiresAt) })}` : ''}
           {detail.retractedAt
-            ? ` · ${t('content.retractedAt', { when: formatter.format(new Date(detail.retractedAt)) })}`
+            ? ` · ${t('content.retractedAt', { when: fmt(detail.retractedAt) })}`
             : ''}
         </p>
       </header>

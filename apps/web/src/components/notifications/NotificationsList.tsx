@@ -6,6 +6,7 @@ import type { z } from 'zod';
 import type { Notification } from '@our-stream/contracts';
 import { browserApi } from '@/lib/api/client';
 import { t } from '@/lib/i18n';
+import { useMounted } from '@/lib/useMounted';
 import { Notice } from '../Notice';
 
 type NotificationT = z.output<typeof Notification>;
@@ -34,7 +35,12 @@ export function NotificationsList({
   const [unread, setUnread] = useState(initialUnread);
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const formatter = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  const mounted = useMounted();
+  const formatter = new Intl.DateTimeFormat(mounted ? undefined : 'en-GB', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    ...(mounted ? {} : { timeZone: 'UTC' }),
+  });
 
   async function markRead(id: string) {
     if (pending) return;
@@ -77,8 +83,9 @@ export function NotificationsList({
                   )}
                 </p>
                 <small className="muted">
-                  <time dateTime={n.createdAt} suppressHydrationWarning>
+                  <time dateTime={n.createdAt}>
                     {formatter.format(new Date(n.createdAt))}
+                    {mounted ? '' : ' UTC'}
                   </time>
                   {n.readAt ? ` · ${t('notifications.read')}` : ''}
                 </small>
