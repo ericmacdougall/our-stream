@@ -20,7 +20,22 @@ export function checkLink(link: MagicLink, request: MagicVerifier | null): LinkC
 }
 
 export type SignInResult<TMe> =
-  { kind: 'ok'; secret: string; me: TMe } | { kind: 'refused' } | { kind: 'network' };
+  | { kind: 'ok'; secret: string; me: TMe }
+  /** A definite answer about this link (401 invalid_token, 409, other 4xx). */
+  | { kind: 'refused' }
+  /** The server answered but could not process the request (429, 5xx, 408): the link is not burned. */
+  | { kind: 'unavailable' }
+  | { kind: 'network' };
+
+/**
+ * Classifies a non-success HTTP status of the consume call. Only a definite answer about this link
+ * spends the verifier; throttling and server faults leave the link valid server-side (a refusal never
+ * marks it used), so the same link must stay retryable within its lifetime.
+ */
+export function classifyConsumeFailure(status: number | undefined): 'refused' | 'unavailable' {
+  if (status === undefined) return 'unavailable';
+  return status === 429 || status === 408 || status >= 500 ? 'unavailable' : 'refused';
+}
 
 export interface ConsumeDeps<TMe extends { user: { id: string } }> {
   store: KeyValueStore;
@@ -35,10 +50,12 @@ export interface ConsumeDeps<TMe extends { user: { id: string } }> {
 export type ConsumeOutcome<TMe> =
   /** Not started on this device, expired, or for another server; nothing was sent. */
   | { kind: 'blocked'; reason: 'no_request' | 'wrong_server' }
-  /** The server answered and refused; the verifier is deleted. */
+  /** The server definitively refused this link; the verifier is deleted. */
   | { kind: 'refused' }
   /** The server was not reached; the verifier is kept so the same link can be retried. */
   | { kind: 'network' }
+  /** Throttled or a server fault (429, 5xx): the link is not burned, the verifier is kept. */
+  | { kind: 'unavailable' }
   | { kind: 'signedIn'; server: ServerConfig; secret: string; me: TMe; replacesSession: boolean }
   /** A session for a different account exists: the user chooses Switch or Keep. */
   | { kind: 'confirmSwitch'; server: ServerConfig; secret: string; me: TMe };
@@ -56,7 +73,8 @@ export async function consumeMagicLink<TMe extends { user: { id: string } }>(
   const { server, verifier } = check.request;
   const result = await deps.consume(server, link.token, verifier);
   if (result.kind === 'network') return { kind: 'network' };
-  // The server saw the token: whatever it answered, this request is spent.
+  if (result.kind === 'unavailable') return { kind: 'unavailable' };
+  // A definite answer about this link (success or refusal): this request is spent.
   await clearMagicVerifier(deps.store);
   if (result.kind === 'refused') return { kind: 'refused' };
   if (deps.currentUserId !== null && deps.currentUserId !== result.me.user.id)

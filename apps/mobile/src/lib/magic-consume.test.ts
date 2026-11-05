@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { memoryStore } from './kv';
 import {
   checkLink,
+  classifyConsumeFailure,
   consumeMagicLink,
   resolveSwitch,
   type ConsumeDeps,
@@ -130,6 +131,54 @@ describe('consumeMagicLink', () => {
     };
     expect(await consumeMagicLink(link, retry)).toMatchObject({ kind: 'signedIn', secret: 's2' });
     expect(calls.consume).toHaveLength(1);
+  });
+});
+
+describe('consume failures keep or spend the verifier', () => {
+  it('classifies statuses: throttling and server faults are transient, other answers definite', () => {
+    expect(classifyConsumeFailure(429)).toBe('unavailable');
+    expect(classifyConsumeFailure(503)).toBe('unavailable');
+    expect(classifyConsumeFailure(502)).toBe('unavailable');
+    expect(classifyConsumeFailure(408)).toBe('unavailable');
+    expect(classifyConsumeFailure(401)).toBe('refused');
+    expect(classifyConsumeFailure(409)).toBe('refused');
+    expect(classifyConsumeFailure(400)).toBe('refused');
+    expect(classifyConsumeFailure(undefined)).toBe('unavailable');
+  });
+  it.each([
+    ['429 rate limited', 429],
+    ['503 unavailable', 503],
+  ])('keeps the verifier on %s and the same link succeeds on retry', async (_n, status) => {
+    const { deps, store, calls } = await setup({
+      result: { kind: classifyConsumeFailure(status) },
+    });
+    expect(await consumeMagicLink(link, deps)).toEqual({ kind: 'unavailable' });
+    expect(await stillStored(store)).toBe(true);
+    const retry = {
+      ...deps,
+      consume: async () => ({ kind: 'ok' as const, secret: 's3', me: me('u1') }),
+    };
+    expect(await consumeMagicLink(link, retry)).toMatchObject({ kind: 'signedIn', secret: 's3' });
+    expect(calls.consume).toHaveLength(1);
+    expect(await stillStored(store)).toBe(false);
+  });
+  it('deletes the verifier on a 401 invalid_token', async () => {
+    const { deps, store } = await setup({ result: { kind: classifyConsumeFailure(401) } });
+    expect(await consumeMagicLink(link, deps)).toEqual({ kind: 'refused' });
+    expect(await stillStored(store)).toBe(false);
+  });
+  it('deletes the verifier on 200 and on a 409', async () => {
+    const ok = await setup({});
+    expect((await consumeMagicLink(link, ok.deps)).kind).toBe('signedIn');
+    expect(await stillStored(ok.store)).toBe(false);
+    const conflict = await setup({ result: { kind: classifyConsumeFailure(409) } });
+    expect(await consumeMagicLink(link, conflict.deps)).toEqual({ kind: 'refused' });
+    expect(await stillStored(conflict.store)).toBe(false);
+  });
+  it('keeps the verifier on network loss', async () => {
+    const { deps, store } = await setup({ result: { kind: 'network' } });
+    expect(await consumeMagicLink(link, deps)).toEqual({ kind: 'network' });
+    expect(await stillStored(store)).toBe(true);
   });
 });
 

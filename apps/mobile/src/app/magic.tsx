@@ -18,7 +18,12 @@ import {
 } from '../lib/deeplink';
 import type { ServerConfig } from '../lib/discovery';
 import { errorMessage } from '../lib/errors';
-import { consumeMagicLink, resolveSwitch, type ConsumeOutcome } from '../lib/magic-consume';
+import {
+  classifyConsumeFailure,
+  consumeMagicLink,
+  resolveSwitch,
+  type ConsumeOutcome,
+} from '../lib/magic-consume';
 import { loadMagicVerifier } from '../lib/magic-verifier';
 import { ALLOW_LOOPBACK_HTTP } from '../lib/runtime';
 import { useSession, type Me } from '../lib/session-context';
@@ -78,7 +83,8 @@ export default function MagicScreen() {
               body: { token, verifier },
             });
             const message = errorMessage(result);
-            if (message || !result.data) return { kind: 'refused' };
+            if (message || !result.data)
+              return { kind: classifyConsumeFailure(result.response?.status) };
             const { secret, me } = splitSignIn(result.data as Me & { sessionToken?: string });
             return secret ? { kind: 'ok', secret, me: me as Me } : { kind: 'refused' };
           } catch {
@@ -94,6 +100,12 @@ export default function MagicScreen() {
         case 'refused':
           setError(strings.errors.invalidLink);
           setPending(false);
+          return;
+        case 'unavailable':
+          // Throttled or a server fault: the link is not burned, so keep it and the verifier.
+          restoreMagicLink(link);
+          setPending(true);
+          setError(strings.errors.generic);
           return;
         case 'network':
           // Never reached the server: keep the link so the user can retry within the TTL.

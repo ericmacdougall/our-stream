@@ -65,8 +65,9 @@ the origin of that request's `webUrl`; otherwise it shows "This sign-in link was
 device or belongs to a different server" and sends nothing. The consume call carries the verifier, and
 the API consumes the link only when `SHA-256(verifier)` matches the stored challenge, so a link opened on
 another device, or a crafted one, cannot sign this app in and a failed attempt does not burn the link.
-The verifier is deleted after any attempt the server answered and kept only on network loss, so the same
-link can be retried within its lifetime. Requesting a new link replaces the verifier, so only the newest
+The verifier is deleted on a success or a definite refusal (401 `invalid_token`, 409 and other 4xx) and
+kept on network loss, 429, 408 and 5xx (the server did not burn the link), so the same link can be
+retried within its lifetime. Requesting a new link replaces the verifier, so only the newest
 emailed link works. When the link belongs to a different account than the current session, the app shows
 the incoming address and asks whether to switch (declining revokes the session the link created). A
 consumed token is remembered for the process so a replayed launch URL cannot resubmit it. The decisions
@@ -111,7 +112,8 @@ Status and error texts are live regions. VoiceOver/TalkBack runs are a manual ch
   gates run.
 - A cold start while offline (or a 5xx from `GET /v1/me`) shows the sign-in screen with a notice instead
   of a retry; any other 401/403 signs out locally with the session-ended notice.
-- Magic links expire in the app after 15 minutes (the API default); a server configured with a longer
+- Magic links expire in the app after 15 minutes (the API default; `GET /v1/meta` does not expose the
+  configured `MAGIC_LINK_TTL_MINUTES`, and no API surface was added for it); a server configured with a longer
   `MAGIC_LINK_TTL_MINUTES` still gets links that the app refuses after 15 minutes. The handoff page is
   built in the web app; until a web build that ships it is deployed, app-started links land on a page
   that cannot open the app. Not yet exercised on a device (custom-scheme hand-off from a mail client).
