@@ -3,7 +3,7 @@
 // scripted behaviour, including hostile outputs. Exported through `@our-stream/documents/testing`.
 import { randomBytes } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { mkdir, readFile, readdir, rename, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Block, Heartbeat, JobFile, ResultFile } from '../protocol.js';
 
@@ -59,6 +59,8 @@ export class SandboxSim {
     if (this.timer) clearInterval(this.timer);
   }
 
+  private beatSeq = 0;
+
   private async beat(): Promise<void> {
     const hb: Heartbeat = {
       v: 1,
@@ -73,8 +75,11 @@ export class SandboxSim {
         noSecretEnv: true,
       },
     };
-    await writeFile(join(this.o.ctlDir, '.hb.tmp'), JSON.stringify(hb));
-    await rename(join(this.o.ctlDir, '.hb.tmp'), join(this.o.ctlDir, 'heartbeat.json'));
+    // A unique temp name per call: start() and the poll timer can both beat, and a shared temp name let one
+    // rename steal the other's file (ENOENT under load).
+    const tmp = join(this.o.ctlDir, `.hb-${process.pid}-${this.beatSeq++}.tmp`);
+    await writeFile(tmp, JSON.stringify(hb));
+    await rename(tmp, join(this.o.ctlDir, 'heartbeat.json'));
   }
 
   private async tick(): Promise<void> {
@@ -97,6 +102,11 @@ export class SandboxSim {
           join(this.o.ctlDir, `.r-${id}.tmp`),
           join(this.o.ctlDir, `response-${id}.json`),
         );
+        // The client removes challenge and response when it finishes; a response written for a challenge
+        // that vanished meanwhile would be an orphan the real parser never leaves, so drop it.
+        if (!(await readdir(this.o.ctlDir)).includes(n)) {
+          await rm(join(this.o.ctlDir, `response-${id}.json`), { force: true });
+        }
       }
     }
     await this.pollSlot();
@@ -122,7 +132,7 @@ export class SandboxSim {
       const jobId = job.jobId;
       switch (b.kind) {
         case 'blocks':
-          await writeFile(
+          await atomicWrite(
             out,
             JSON.stringify({ v: 1, jobId, ok: true, kind: job.kind, blocks: b.blocks }),
           );
@@ -143,7 +153,7 @@ export class SandboxSim {
           await atomicWrite(out, b.body);
           break;
         case 'wrong-job':
-          await writeFile(
+          await atomicWrite(
             out,
             JSON.stringify({ v: 1, jobId: 'f'.repeat(32), ok: false, code: 'internal' }),
           );
