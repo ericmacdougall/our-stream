@@ -95,7 +95,13 @@ export async function reportPinReadiness(
   platformUrl: string,
   pinId: string,
   indexValid: boolean,
-): Promise<{ pinId: string; indexValid: boolean; coverageComplete: boolean; total: number; covered: number }> {
+): Promise<{
+  pinId: string;
+  indexValid: boolean;
+  coverageComplete: boolean;
+  total: number;
+  covered: number;
+}> {
   if (!UUID_RE.test(pinId)) throw new Error('reportPinReadiness: pin id must be a UUID');
   const client = new pg.Client({ connectionString: platformUrl });
   await client.connect();
@@ -112,7 +118,11 @@ export async function reportPinReadiness(
       covered += Number(r.rows[0]?.covered ?? 0);
     }
     const coverageComplete = covered >= total;
-    await client.query('SELECT platform_embedding_pin_ready($1, $2, $3)', [pinId, indexValid, coverageComplete]);
+    await client.query('SELECT platform_embedding_pin_ready($1, $2, $3)', [
+      pinId,
+      indexValid,
+      coverageComplete,
+    ]);
     return { pinId, indexValid, coverageComplete, total, covered };
   } finally {
     await client.end();

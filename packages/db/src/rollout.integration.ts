@@ -855,18 +855,33 @@ describe.skipIf(!enabled)('embeddings: pin, table and definer functions (integra
   });
 
   it('post-migrate index job: creates, keeps, rebuilds an INVALID index and reports readiness (idempotent)', async () => {
-    const shadow = (await h.platform.query<{ id: string }>(`SELECT platform_embedding_pin_register('index-job', 1024) AS id`)).rows[0]!.id;
+    const shadow = (
+      await h.platform.query<{ id: string }>(
+        `SELECT platform_embedding_pin_register('index-job', 1024) AS id`,
+      )
+    ).rows[0]!.id;
     const name = `embedding_hnsw_${shadow.slice(0, 8)}`;
     const valid = async () =>
-      (await h.admin.query<{ v: boolean }>(`SELECT i.indisvalid AS v FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid WHERE c.relname = $1`, [name])).rows[0]?.v;
+      (
+        await h.admin.query<{ v: boolean }>(
+          `SELECT i.indisvalid AS v FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid WHERE c.relname = $1`,
+          [name],
+        )
+      ).rows[0]?.v;
     const first = await ensurePinIndex(scratch.adminUrl, shadow);
     expect(first).toMatchObject({ action: 'created', valid: true, index: name });
     expect(await valid()).toBe(true);
     expect((await ensurePinIndex(scratch.adminUrl, shadow)).action).toBe('kept');
     // An interrupted concurrent build leaves an INVALID index; the job drops and rebuilds it.
-    await h.admin.query(`UPDATE pg_index SET indisvalid = false WHERE indexrelid = ('public.' || $1)::regclass`, [name]);
+    await h.admin.query(
+      `UPDATE pg_index SET indisvalid = false WHERE indexrelid = ('public.' || $1)::regclass`,
+      [name],
+    );
     expect(await valid()).toBe(false);
-    expect(await ensurePinIndex(scratch.adminUrl, shadow)).toMatchObject({ action: 'rebuilt', valid: true });
+    expect(await ensurePinIndex(scratch.adminUrl, shadow)).toMatchObject({
+      action: 'rebuilt',
+      valid: true,
+    });
     expect(await valid()).toBe(true);
     // Readiness: coverage is complete only when no chunk hash of a current version lacks a vector.
     const o = await h.seedOrg();
@@ -877,17 +892,32 @@ describe.skipIf(!enabled)('embeddings: pin, table and definer functions (integra
     expect(before.total).toBeGreaterThan(before.covered);
     await upsert(o, hash, shadow, unitVector(400));
     for (const x of (await h.platform.query<{ id: string }>('SELECT platform_orgs() AS id')).rows) {
-      for (const hh of (await h.platform.query<{ h: Buffer }>('SELECT platform_embedding_reconcile($1, $2, 1000) AS h', [x.id, shadow])).rows) {
-        await h.platform.query('SELECT platform_embedding_upsert($1, $2, $3, $4::vector)', [x.id, hh.h, shadow, unitVector(401)]);
+      for (const hh of (
+        await h.platform.query<{ h: Buffer }>(
+          'SELECT platform_embedding_reconcile($1, $2, 1000) AS h',
+          [x.id, shadow],
+        )
+      ).rows) {
+        await h.platform.query('SELECT platform_embedding_upsert($1, $2, $3, $4::vector)', [
+          x.id,
+          hh.h,
+          shadow,
+          unitVector(401),
+        ]);
       }
     }
     const after = await reportPinReadiness(scratch.platformUrl, shadow, true);
     expect(after).toMatchObject({ coverageComplete: true, indexValid: true });
-    const ready = await h.admin.query<{ index_valid: boolean; coverage_complete: boolean }>('SELECT index_valid, coverage_complete FROM platform.embedding_pin_ready WHERE pin_id = $1', [shadow]);
+    const ready = await h.admin.query<{ index_valid: boolean; coverage_complete: boolean }>(
+      'SELECT index_valid, coverage_complete FROM platform.embedding_pin_ready WHERE pin_id = $1',
+      [shadow],
+    );
     expect(ready.rows[0]).toEqual({ index_valid: true, coverage_complete: true });
     // Control: a not-yet-valid index is reported as such and blocks the switch.
     await reportPinReadiness(scratch.platformUrl, shadow, false);
-    await expect(h.platform.query('SELECT platform_embedding_pin_switch($1)', [shadow])).rejects.toThrow(/not ready/);
+    await expect(
+      h.platform.query('SELECT platform_embedding_pin_switch($1)', [shadow]),
+    ).rejects.toThrow(/not ready/);
     await h.platform.query('SELECT platform_embedding_pin_retire($1)', [shadow]);
   });
 
