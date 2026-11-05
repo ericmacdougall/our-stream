@@ -113,6 +113,7 @@ describe('document gate: TypeScript callers of readerVisibleSql', () => {
   const EXPECTED = [
     'apps/api/src/lib/content.ts',
     'apps/api/src/lib/m1b-sql.ts',
+    'apps/api/src/lib/retrieval/engine.ts', // retrieval slice: document-fixture tests in apps/api/src/retrieval*.integration.ts
     'apps/api/src/routes/content.ts',
     'apps/api/src/routes/feed.ts',
     'apps/api/src/routes/media.ts',
