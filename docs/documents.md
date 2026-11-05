@@ -64,7 +64,7 @@ All worker-side functions are granted to `ourstream_platform` only and are not o
 | `platform_embedding_chunk_text(org, hashes[])`                      | text for up to 200 hashes, current versions only.                                                                                                |
 | `platform_embedding_upsert(org, hash, pin, vector) -> boolean`      | refuses zero vectors, wrong dimensions, a pin that is not active or shadow, and hashes no chunk of the org references; `ON CONFLICT DO NOTHING`. |
 | `platform_embedding_gc(org) -> int`                                 | removes vectors no chunk references; takes an exclusive advisory lock that waits for in-flight `platform_document_finish` transactions.          |
-| `platform_embedding_coverage(org, pin) -> (total, covered)`         | per-org coverage for the readiness job, which loops over orgs (an org with documents disabled counts as 0 of 0).                                                                                   |
+| `platform_embedding_coverage(org, pin) -> (total, covered)`         | per-org coverage for the readiness job, which loops over orgs (an org with documents disabled counts as 0 of 0).                                 |
 | `platform_embedding_pin_register(model, dims) -> uuid`              | registers a shadow pin (1024 dimensions only).                                                                                                   |
 | `platform_embedding_pin_ready(pin, index_valid, coverage_complete)` | writes the readiness row. Coverage tolerance: zero chunk hashes of current versions without a vector.                                            |
 | `platform_embedding_pin_switch(pin)`                                | refuses unless the target is a shadow pin with a fresh ready row; demotes the old active pin to shadow, then promotes the target.                |
@@ -90,3 +90,51 @@ Run as the platform role. Record each step's result.
 5. Check: no document reachable through any reader path, clip upload, index and search work.
 
 Roll-forward order: deploy the new build, clear the kill switch (`platform_documents_kill_switch_set(false)`), restore the recorded flags (`platform_documents_flag_restore_all()`, which overwrites any admin change made after the switch cleared; accepted), then restore documents (`SELECT * FROM platform_documents_restore();`). Restore touches only recorded rows that are still `draft`, not retracted and whose `updated_at` equals the recorded value; the others are reported (`skipped_modified`, `skipped_retracted`, `skipped_not_draft`). It re-emits `content.published` for a live document's current version (the notification layer dedupes by `published:<versionId>`, so nobody is notified twice) and `content.scheduled` / `content.expiry_scheduled` for a future schedule, bypasses the `content_publish` guard and is idempotent. Both hide and restore write one `audit_event` per org and advance the org epoch.
+
+## Retrieval (M2a retrieval slice)
+
+`POST /v1/retrieval/query` (`apps/api/src/routes/retrieval.ts`, engine in `apps/api/src/lib/retrieval/`) returns the chunks of content the asker may see at that instant. No model and no cache decides authorization; the predicate in the query does, and an independent reference check confirms it. Route shape: `docs/api.md`.
+
+### Request flow
+
+1. The member session is resolved (a deactivated or removed member is refused before any query) and the per-user budget is charged (60 per minute, 429 `rate_limited` with a fixed body, in-process fixed window like the other budgets).
+2. The query is normalised (NFC, zero-width characters removed, controls to spaces, trimmed; at most 2,000 UTF-16 units, `k` at most 50, both 400 above). An empty query answers an empty `keyword_only` page.
+3. The query text is embedded before any tenant transaction opens, with a 2 second timeout (`QueryEmbedder` in `lib/retrieval/embedder.ts`). A timeout, error, refusal, missing embedder, zero or non-finite vector degrades the request to `keyword_only` with `degraded` set (HTTP 200). A refusal (`EmbedRefusedError`) is what the provider policy router produces for a non-self-hosted provider under the default `selfHostOnly`; it never falls back (NEG-8). An embedder whose `model` is not the active pin's model is not used (`pin_mismatch`).
+4. `withTenant(..., { isolation: 'REPEATABLE READ', onEpochCheck })` reads both epochs in their own short transactions before and after the request transaction. One `now` is captured per request and passed to every predicate. The result of a request whose epoch pair changed is returned but never cached.
+5. Inside the snapshot: the permitted-id cache lookup, the keyword leg (`websearch_to_tsquery('simple', q)` over `chunk.tsv`), the approximate vector leg, the exact fallback, reciprocal-rank fusion (constant 60, ties by chunk id), hydration, and the reference post-check.
+
+Every leg joins `chunk` to `content` on `content.current_version_id = chunk.content_version_id` and to a `content_version` whose status is `current`, and embeds `readerVisibleSql` (documents also pass the document gate, so a flag-off org, the kill switch, a processing or failed version return nothing). Vectors are joined by `(org, text_sha256, active pin)`; a chunk without a vector takes part in the keyword leg only.
+
+### Limits and settings
+
+| setting                 | value                                                           | where                  |
+| ----------------------- | --------------------------------------------------------------- | ---------------------- |
+| `k`, query length       | 50, 2,000 characters                                            | request validation     |
+| candidate over-fetch    | 4 x k per leg                                                   | `OVERFETCH`            |
+| `hnsw.iterative_scan`   | `relaxed_order`                                                 | `HNSW_ITERATIVE_SCAN`  |
+| `hnsw.ef_search`        | 100                                                             | `HNSW_EF_SEARCH`       |
+| `hnsw.max_scan_tuples`  | 20,000                                                          | `HNSW_MAX_SCAN_TUPLES` |
+| exact-scan fallback     | SAVEPOINT, `statement_timeout` 200 ms, 20,000 candidate rows    | `FALLBACK_*`           |
+| fallback concurrency    | 4 per process, try-acquire, full means `keyword_only` at once   | `FALLBACK_CONCURRENCY` |
+| query embedding timeout | 2 s                                                             | `EMBED_TIMEOUT_MS`     |
+| permitted-id cache      | 30 s bucket, 200,000 ids in total, 5,000 per entry, 16-byte ids | `CACHE_*`              |
+
+The approximate leg writes the active pin's id into the SQL text as a literal (never a bind parameter), so the partial HNSW index `embedding_hnsw_<first 8 hex digits of the pin id>` matches under generic plans, including after a pin switch. The vector scan sits in a `LATERAL ... OFFSET 0` fence so the join to the permission tables is evaluated per candidate while the index scan keeps its order (without the fence the planner joined first and sorted, which is an exact scan), and `enable_sort = off` is set for that one statement so the order comes from the index; the previous value is restored afterwards. `relaxed_order` can return rows slightly out of order, so the result is re-sorted in a materialised CTE.
+
+The exact-scan fallback runs when the approximate leg returned fewer than `k` rows (pgvector does not report that `max_scan_tuples` was hit): a SAVEPOINT, `statement_timeout` lowered to 200 ms with `set_config(..., true)`, an exact distance ranking over at most 20,000 permitted candidate rows. On success the savepoint is released and the saved `statement_timeout` is restored with `set_config('statement_timeout', <saved>, true)` so the loader that follows is not bound by 200 ms. Any failure of the fallback drops the vector leg for that request and answers `keyword_only` with a flag (never a partial vector answer): `fallback_timeout` (the savepoint is rolled back, the snapshot survives), `fallback_cap` (more than 20,000 permitted candidates, so the scan would not be exact; the response to the row cap), `fallback_busy` (semaphore full).
+
+Recall guard: `retrieval-recall.integration.ts` seeds 20,000 chunks over 3 orgs where the asker sees 1 percent and asserts recall@10 of at least 0.95 against an independent exact ranking with the settings above; with `max_scan_tuples = 200` the approximate leg runs short and only the fallback keeps recall (its broken variant fails the test).
+
+### Permitted-id cache
+
+Key `(org, user, authz_epoch, org_content_epoch, 30 s bucket)`; value: the content ids the asker may read, nothing else (no chunk text). A hit only NARROWS the candidates (`c.id = ANY(ids)`); every returned chunk is still decided by the full predicate at the request's `now` inside its snapshot, so a stale entry can never add a result and removal of access is exact. Newly permitted content (a publish, an audience grow, `publish_at` crossing) may be missing from a cached set for at most one bucket unless an epoch bump changes the key. Because `org_content_epoch` comes from a sequence (`nextval` is not transactional) a reader can cache an older snapshot's set under the newer epoch while a writer is still uncommitted; the full re-check closes that window (a test holds a writer open after `nextval`). Per-process LRU: oldest entries are evicted beyond 200,000 ids in total, a set above 5,000 ids is not cached, and entries older than the current bucket are purged on every lookup and store.
+
+### Reference post-check and failure behaviour
+
+`referencePostCheck` (`lib/retrieval/reference-check.ts`) loads a scoped snapshot in the same transaction: the candidate content ids (kind, current version status and id, state, schedule, retraction), the asker's membership, the org flag and the kill switch, the tuples whose object is a candidate or one of its audience streams, and the groups reachable from the asker level by level up to `MAX_GROUP_DEPTH`. Each chunk must belong to the content's current version, that version must be `current`, and `readerVisible` from `packages/authz/src/reference.ts` (a graph walk that shares no code with the SQL generator) must hold at the captured `now`. A disagreement or a loader failure throws, increments the counter `authz.leak_check_failed` (`lib/retrieval/metrics.ts`) and returns nothing (HTTP 500 `internal`). Messages never carry ids or text; query and chunk text appear in no log.
+
+### Integration points for other slices
+
+- Embedder: `RetrievalOptions.embedder` (`routes/retrieval.ts`, passed as `AppDeps.retrieval`). Until the worker slice adds the `embed` capability to `packages/providers`, production runs keyword-only (`degraded: embed_unavailable`). Wire it to an adapter over `selectProvider('embed')` whose refusals throw `EmbedRefusedError` and whose `model` is the pin's model.
+- Rate limiter: the retrieval budget is its own `FixedWindowLimiter` (60 per user per minute) created in `registerRetrievalRoutes`; the keyword search route keeps `limits.search`. A shared module can replace it without changing the route.
+- Counter: `authz.leak_check_failed` is exported through `snapshotCounters()`.

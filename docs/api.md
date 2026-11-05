@@ -242,3 +242,12 @@ linkPath}` is identical for unknown, deactivated and no-access recipients, every
   `commentsEnabled`. `GET /v1/streams` items and `PATCH /v1/streams/:id` carry `commentsEnabled`.
 - `GET /v1/me` carries `hasPassword`; `POST /v1/auth/password` answers 409 `password_set` before
   hashing when a password exists.
+
+## M2a: retrieval (`POST /v1/retrieval/query`)
+
+Member session (cookie or bearer; cookie sessions need the CSRF header or a trusted Origin like any mutation). Body `{ q: string (0..2000), k?: 1..50 (default 10) }`; 400 `validation` outside those bounds. Response `{ items, retrievalMode, degraded }`:
+
+- `items[]`: `chunkId`, `contentId`, `versionId`, `kind` (`clip|audio|document`), `locator` (PDF page, slide, sheet and rows, heading, or transcript time as written by the parser), `snippet` (the first 300 code points of the chunk, plain text) and `score` (reciprocal-rank fusion). Only chunks of the content's current published version the asker may read at that instant are returned; retraction, expiry, audience or membership changes are visible to the next request (newly permitted content can lag one 30 second cache bucket).
+- `retrievalMode`: `hybrid` (keyword and vector legs) or `keyword_only`. `degraded` is null, or why the vector leg was skipped (`embed_unavailable`, `embed_timeout`, `embed_refused`, `pin_mismatch`, `fallback_busy`, `fallback_timeout`, `fallback_cap`, `vector_unavailable`); the status is still 200.
+- Errors: 401 unauthenticated, 403 `no_org` / `not_member` (a deactivated member is refused), 429 `rate_limited` (`too many requests`, 60 per user per minute; the body is identical for every refusal), 500 `internal` when the independent permission check fails closed (nothing is returned).
+- Organisations with documents disabled (or the deployment kill switch engaged) get no document chunks; clips are unaffected. The query text and chunk text are never logged. See `docs/documents.md` ("Retrieval") for the engine, limits and cache contract.
