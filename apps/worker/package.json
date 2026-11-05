@@ -9,11 +9,13 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev": "tsx watch src/main.ts",
     "start": "node dist/main.js",
+    "pin-cli": "node dist/pin-cli.js",
     "test": "vitest run --project unit",
     "test:integration": "vitest run --project integration"
   },
   "dependencies": {
     "@our-stream/db": "workspace:*",
+    "@our-stream/documents": "workspace:*",
     "@our-stream/notifications": "workspace:*",
     "@our-stream/pipeline": "workspace:*",
     "@our-stream/providers": "workspace:*",

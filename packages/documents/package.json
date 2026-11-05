@@ -8,6 +8,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/sandbox-sim.d.ts",
+      "default": "./dist/testing/sandbox-sim.js"
     }
   },
   "scripts": {

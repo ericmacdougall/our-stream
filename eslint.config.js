@@ -73,6 +73,8 @@ export default tseslint.config(
       'apps/web/scripts/**',
       'apps/web/test/**',
       '**/src/cli.ts',
+      '**/src/pin-cli.ts',
+      '**/src/testing/**',
       '**/src/openapi-emit.ts',
     ],
     rules: { 'no-console': 'off' },

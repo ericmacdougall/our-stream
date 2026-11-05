@@ -13,6 +13,10 @@ import { engagementRetention, searchPrune, searchReindex } from './maintenance.j
 import { outboxDrain } from './outbox.js';
 import { mediaProcess } from './media.js';
 import { contentTransition } from './transition.js';
+import { documentProcess } from './documents/process.js';
+import { embedReconcile, embedVersion, type EmbedRuntime } from './documents/embed.js';
+import { embedPin } from './documents/pin.js';
+import type { ParserClient } from '@our-stream/documents';
 
 export const TenantJob = z.object({ orgId: z.uuid() });
 
@@ -37,6 +41,10 @@ export interface JobContext {
   queue: JobQueue;
   store: ObjectStore;
   asr: AsrProvider;
+  /** Parser sandbox client (document.process); absent where documents are not configured. */
+  parser?: ParserClient;
+  /** Embedding providers and policy (embed.* jobs); absent where documents are not configured. */
+  embed?: EmbedRuntime;
   limits: PipelineLimits;
   /** Email channel (ADR-0005); a LoggingMailer when SMTP_URL is unset. */
   mailer: Mailer;
@@ -46,7 +54,13 @@ export interface JobContext {
   now: () => Date;
 }
 
-export type Handler = (data: unknown, ctx: JobContext) => Promise<void>;
+/** pg-boss retry metadata for the job being handled (absent in unit tests that call a handler directly). */
+export interface JobMeta {
+  retryCount: number;
+  retryLimit: number;
+}
+
+export type Handler = (data: unknown, ctx: JobContext, meta?: JobMeta) => Promise<void>;
 
 /** Example tenant job proving the tenant context contract. */
 export const tenantPing: Handler = async (data, ctx) => {
@@ -66,6 +80,10 @@ export const QUEUES = {
   engagementRetention: 'engagement.retention',
   searchPrune: 'search.prune',
   searchReindex: 'search.reindex',
+  documentProcess: 'document.process',
+  embedVersion: 'embed.version',
+  embedReconcile: 'embed.reconcile',
+  embedPin: 'embed.pin',
 } as const;
 
 export const handlers: Record<string, Handler> = {
@@ -77,4 +95,8 @@ export const handlers: Record<string, Handler> = {
   [QUEUES.engagementRetention]: engagementRetention,
   [QUEUES.searchPrune]: searchPrune,
   [QUEUES.searchReindex]: searchReindex,
+  [QUEUES.documentProcess]: documentProcess,
+  [QUEUES.embedVersion]: embedVersion,
+  [QUEUES.embedReconcile]: embedReconcile,
+  [QUEUES.embedPin]: embedPin,
 };

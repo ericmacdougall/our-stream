@@ -30,6 +30,8 @@ interface Script {
   /** value returned by the attempts UPDATE after a failure (default 1) */
   attemptsAfter?: number;
   commentBrief?: Row | null;
+  /** answer of platform_content_kind (undefined: no row, as for unknown content) */
+  contentKind?: string | null;
 }
 
 /** Minimal pg stand-in that answers the worker's SQL by function name and records every call. */
@@ -38,6 +40,7 @@ function fakeDb(script: Script) {
   const query = async (sql: string, params: unknown[] = []) => {
     calls.push({ sql, params });
     const rows = ((): Row[] => {
+      if (sql.includes('platform_content_kind')) return [{ kind: script.contentKind ?? null }];
       if (sql.includes('platform_content_schedule'))
         return script.schedule ? [script.schedule] : [];
       if (sql.includes('platform_audience_of_content')) return script.audience ?? [];
@@ -109,8 +112,8 @@ const ev = (type: string, extra: Partial<DomainEvent> = {}): DomainEvent => ({
 });
 
 describe('dispatchEvent', () => {
-  it('content.version_uploaded enqueues media.process keyed by version', async () => {
-    const db = fakeDb({});
+  it('content.version_uploaded enqueues media.process keyed by version (clip)', async () => {
+    const db = fakeDb({ contentKind: 'clip' });
     const ctx = ctxWith(db.pool);
     await dispatchEvent(db.pool, ctx, ev('content.version_uploaded'));
     expect(ctx.sent).toEqual([
@@ -123,6 +126,36 @@ describe('dispatchEvent', () => {
     expect(
       await dispatchEvent(db.pool, ctx, ev('content.version_uploaded', { version_id: null })),
     ).toMatch(/skipped/);
+  });
+
+  it('routes by content kind through platform_content_kind: documents go to document.process, never media.process', async () => {
+    const db = fakeDb({ contentKind: 'document' });
+    const ctx = ctxWith(db.pool);
+    expect(await dispatchEvent(db.pool, ctx, ev('content.version_uploaded'))).toBe(
+      'enqueued document.process',
+    );
+    expect(ctx.sent).toEqual([
+      {
+        name: 'document.process',
+        data: { orgId: ORG, contentId: CONTENT, versionId: VERSION },
+        options: { singletonKey: `doc:${VERSION}` },
+      },
+    ]);
+    expect(ctx.sent.some((s) => s['name'] === 'media.process')).toBe(false);
+    const kindCall = db.calls.find((c) => c.sql.includes('platform_content_kind'));
+    expect(kindCall?.params).toEqual([ORG, CONTENT]);
+  });
+
+  it('clips and audio never reach the document queue; unknown content falls to media (which drops it)', async () => {
+    for (const kind of ['clip', 'audio', null]) {
+      const db = fakeDb({ contentKind: kind });
+      const ctx = ctxWith(db.pool);
+      await dispatchEvent(db.pool, ctx, ev('content.version_uploaded'));
+      expect(
+        ctx.sent.map((s) => s['name']),
+        String(kind),
+      ).toEqual(['media.process']);
+    }
   });
 
   it('content.scheduled reads the schedule from the database and defers both transitions', async () => {

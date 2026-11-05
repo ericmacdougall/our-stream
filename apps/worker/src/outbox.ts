@@ -226,11 +226,18 @@ export async function dispatchEvent(db: Query, ctx: JobContext, ev: DomainEvent)
   switch (ev.type) {
     case 'content.version_uploaded': {
       if (!ev.version_id) return 'skipped: no version_id';
-      await ctx.queue.send(
-        QUEUES.mediaProcess,
-        { orgId: ev.org_id, contentId: ev.subject_id, versionId: ev.version_id },
-        { singletonKey: `media:${ev.version_id}` },
+      // The content kind decides the pipeline: document versions never reach media.process and clips never
+      // reach the document queue. The lookup is a platform definer function (no tenant context here).
+      const kind = await db.query<{ kind: string | null }>(
+        'SELECT platform_content_kind($1, $2) AS kind',
+        [ev.org_id, ev.subject_id],
       );
+      const job = { orgId: ev.org_id, contentId: ev.subject_id, versionId: ev.version_id };
+      if (kind.rows[0]?.kind === 'document') {
+        await ctx.queue.send(QUEUES.documentProcess, job, { singletonKey: `doc:${ev.version_id}` });
+        return 'enqueued document.process';
+      }
+      await ctx.queue.send(QUEUES.mediaProcess, job, { singletonKey: `media:${ev.version_id}` });
       return 'enqueued media.process';
     }
     case 'content.scheduled':

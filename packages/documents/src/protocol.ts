@@ -55,21 +55,21 @@ export const REFUSAL_CODES = [
 export type RefusalCode = (typeof REFUSAL_CODES)[number];
 
 export interface Locator {
-  page?: number;
-  slide?: number;
-  sheet?: string;
-  rowStart?: number;
-  rowEnd?: number;
-  heading?: string;
+  page?: number | undefined;
+  slide?: number | undefined;
+  sheet?: string | undefined;
+  rowStart?: number | undefined;
+  rowEnd?: number | undefined;
+  heading?: string | undefined;
 }
 
 export interface Block {
   text: string;
   locator: Locator;
   /** A heading starts a new chunk and sets the heading path for the blocks after it. */
-  heading?: boolean;
+  heading?: boolean | undefined;
   /** Heading level (1 = top); used to maintain the heading path. */
-  level?: number;
+  level?: number | undefined;
 }
 
 const LocatorSchema = z.strictObject({

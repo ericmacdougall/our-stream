@@ -297,6 +297,9 @@ importers:
       '@our-stream/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@our-stream/documents':
+        specifier: workspace:*
+        version: link:../../packages/documents
       '@our-stream/notifications':
         specifier: workspace:*
         version: link:../../packages/notifications

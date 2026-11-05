@@ -163,6 +163,16 @@ export class ParserService {
             }
           : { v: 1, jobId, ok: false, code: r.code };
       }
+      // The worker wipes the slot when it gives up on a job; a result for a job that is no longer in the slot
+      // must not land in the next occupant's slot (it would block that job).
+      const again = await readRegularFile(jobPath, 4096);
+      const stillThere = again
+        ? (safeJson(again) as { jobId?: unknown } | undefined)?.jobId === jobId
+        : false;
+      if (!stillThere) {
+        this.log({ jobId }, 'parser job abandoned by the worker; result discarded');
+        return;
+      }
       await writeAtomic(this.o.slotDir, 'result.json', JSON.stringify(result));
       this.log(
         {

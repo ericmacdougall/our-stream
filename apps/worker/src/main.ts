@@ -1,11 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { ensureBossSchema } from './boss-bootstrap.js';
-import { PgBoss, type Job } from 'pg-boss';
+import { PgBoss, type JobWithMetadata } from 'pg-boss';
 import pino from 'pino';
-import { createPool } from '@our-stream/db';
+import { assertPgvectorVersion, createPool } from '@our-stream/db';
 import { createSmtpMailer, LoggingMailer } from '@our-stream/notifications';
 import { createObjectStore, limitsFromEnv, s3ConfigFromEnv } from '@our-stream/pipeline';
-import { createAsrProviderFromEnv, selectProvider } from '@our-stream/providers';
+import {
+  createAsrProviderFromEnv,
+  createEmbedProviderFromEnv,
+  selectProvider,
+  type EmbedProvider,
+} from '@our-stream/providers';
+import { ParserClient } from '@our-stream/documents';
 import { handlers, QUEUES, type JobContext } from './jobs.js';
 import { startHealthServer, type WorkerHealthState } from './health.js';
 import { drainOnce } from './outbox.js';
@@ -29,7 +35,42 @@ const policy = {
 };
 const asr = selectProvider(policy, [createAsrProviderFromEnv()], 'asr');
 const limits = limitsFromEnv();
+
+// Embedding providers (ADR-0008): the pinned default, plus an optional shadow-pin model for a same-dimension
+// swap. The policy router is applied per call in documents/embed.ts with one candidate per pin (no fallback).
+const embedProviders: EmbedProvider[] = [createEmbedProviderFromEnv(process.env, 'EMBED')];
+if (process.env['EMBED_SHADOW_PROVIDER'])
+  embedProviders.push(createEmbedProviderFromEnv(process.env, 'EMBED_SHADOW'));
+if (
+  process.env['NODE_ENV'] === 'production' &&
+  embedProviders.some((p) => p.descriptor.id === 'embed-fake') &&
+  process.env['EMBED_ALLOW_FAKE_IN_PRODUCTION'] !== 'true'
+) {
+  log.error(
+    'the fake embedder is not semantic and is refused in production; set EMBED_PROVIDER=qwen-http',
+  );
+  process.exit(2);
+}
+const parser = new ParserClient({
+  slotDir: process.env['PARSER_SLOT_DIR'] ?? '/parser-io/slot',
+  ctlDir: process.env['PARSER_CTL_DIR'] ?? '/parser-io/ctl',
+  heartbeatTtlMs: Number(process.env['PARSER_HEARTBEAT_TTL_MS'] ?? '15000'),
+});
 const store = createObjectStore(s3ConfigFromEnv());
+
+// pgvector 0.8.0 or later (iterative index scan) is required by retrieval; fail closed below it.
+{
+  const checkPool = createPool(platformUrl, { max: 1 });
+  try {
+    const v = await assertPgvectorVersion(checkPool);
+    log.info({ pgvector: v }, 'pgvector version check');
+  } catch (err) {
+    log.error({ err: (err as Error).message }, 'pgvector check failed; refusing to start');
+    process.exit(2);
+  } finally {
+    await checkPool.end();
+  }
+}
 
 const bossSchema = 'pgboss';
 // Install pg-boss objects as the schema-owning platform role (no CREATE on the database), then start
@@ -82,6 +123,8 @@ const ctx: JobContext = {
   queue: { send: (name, data, options) => boss.send(name, data, options) },
   store,
   asr,
+  parser,
+  embed: { policy, providers: embedProviders },
   limits,
   mailer,
   appBaseUrl: appBaseUrl ?? 'http://localhost:3000',
@@ -104,6 +147,28 @@ await boss.createQueue(QUEUES.contentTransition, {
   retryDelay: 10,
   retryBackoff: true,
 });
+// Document parsing waits for the single sandbox slot and may take the full parser wall limit; a refused claim
+// is acknowledged, an unavailable sandbox is retried and then ends the version failed (documents/process.ts).
+await boss.createQueue(QUEUES.documentProcess, {
+  policy: 'stately',
+  retryLimit: 3,
+  retryDelay: 30,
+  retryBackoff: true,
+  expireInSeconds: 1800,
+});
+await boss.createQueue(QUEUES.embedVersion, {
+  policy: 'stately',
+  retryLimit: 5,
+  retryDelay: 30,
+  retryBackoff: true,
+});
+await boss.createQueue(QUEUES.embedReconcile, { policy: 'short', retryLimit: 1, retryDelay: 300 });
+// Pin fill, readiness and switch are operator-started and long-running; never retried automatically.
+await boss.createQueue(QUEUES.embedPin, {
+  policy: 'stately',
+  retryLimit: 0,
+  expireInSeconds: 6 * 3600,
+});
 await boss.createQueue(QUEUES.outboxDrain, { policy: 'short', retryLimit: 0 });
 await boss.createQueue(QUEUES.tenantPing);
 // M1b scheduled jobs: singleton per run; a failed run is retried once, the next cron tick covers the rest.
@@ -118,15 +183,21 @@ await boss.createQueue(QUEUES.searchReindex, { policy: 'stately', retryLimit: 2,
 
 const concurrency: Record<string, number> = {
   [QUEUES.mediaProcess]: Number(process.env['MEDIA_CONCURRENCY'] ?? '1'),
+  // One parse at a time per worker process: the parser has a single slot.
+  [QUEUES.documentProcess]: 1,
 };
 for (const [name, handler] of Object.entries(handlers)) {
   const n = concurrency[name] ?? 1;
   for (let i = 0; i < n; i += 1) {
-    await boss.work(name, { batchSize: 1 }, async (jobs: Job<unknown>[]) => {
-      for (const job of jobs) {
-        await handler(job.data, ctx);
-      }
-    });
+    await boss.work(
+      name,
+      { batchSize: 1, includeMetadata: true },
+      async (jobs: JobWithMetadata<unknown>[]) => {
+        for (const job of jobs) {
+          await handler(job.data, ctx, { retryCount: job.retryCount, retryLimit: job.retryLimit });
+        }
+      },
+    );
   }
 }
 // Belt and braces: the cron keeps draining if the in-process timer dies with a replica.
@@ -143,6 +214,14 @@ await boss.schedule(
   process.env['RETENTION_CRON'] ?? '30 3 * * *',
   {},
   { singletonKey: 'retention' },
+);
+// Embedding reconciliation: garbage-collect unreferenced vectors, embed what is missing (parses that lost a
+// vector to a concurrent collection, clip chunk backfill) and log per-org readiness.
+await boss.schedule(
+  QUEUES.embedReconcile,
+  process.env['EMBED_RECONCILE_CRON'] ?? '*/10 * * * *',
+  {},
+  { singletonKey: 'embed-reconcile' },
 );
 await boss.schedule(
   QUEUES.searchPrune,
@@ -174,6 +253,7 @@ log.info(
   {
     queues: Object.keys(handlers),
     asr: asr.descriptor.id,
+    embed: embedProviders.map((p) => `${p.descriptor.id}:${p.model}`),
     mailer: smtpUrl ? 'smtp' : 'logging',
     policy,
     drainIntervalMs,
