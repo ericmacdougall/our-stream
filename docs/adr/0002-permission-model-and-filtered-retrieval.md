@@ -1,6 +1,6 @@
 # ADR-0002: Permission model and permission-filtered retrieval
 
-Status: proposed v2, 2026-11-03 (revised after plan review round 1: findings F1-F4, F10). Confidence: high.
+Status: proposed v2, 2026-11-03 (revised after plan review round 1: findings F1-F4, F10); amended 2026-11-04 for the M2a document gate. Confidence: high.
 
 ## Context
 
@@ -49,6 +49,23 @@ Audience is expressed as tuples: publishing content "to stream S" writes `(conte
 - **Grants are inserted by the reconciliation job** (`authz.reconcile`, enqueued by the same triggers) because a delayed grant is availability, not a leak; small grants (a single user added to a stream) are also applied inline by the trigger for responsiveness. The job additionally runs a periodic full reconcile that must find zero differences (alerting metric). Division of labour: triggers delete synchronously and may insert small grants; the job inserts bulk grants and reconciles.
 - Group depth ≤ 4 and cycle rejection are enforced in `authz.writeTuples` before insert.
 
+### Amendment (M2a, 2026-11-04): the document gate
+
+Documents (`content.kind = 'document'`) add one clause to `readerVisible`, in the generated SQL, in the independent reference implementation and in every hand copy of the rule:
+
+```sql
+(c.kind <> 'document'
+ OR ((SELECT platform_documents_enabled(:org))
+     AND EXISTS (SELECT 1 FROM content_version cv
+                 WHERE cv.org_id = c.org_id AND cv.id = c.current_version_id AND cv.status = 'current')))
+```
+
+- `platform_documents_enabled(org)` (a STABLE definer function on the app allow-list that asserts `org = app_org()`) combines the deployment kill switch (`platform.documents_kill_switch`) with the org flag `org.settings.documents_enabled`. An absent or non-true key is off, so the gate fails closed. It is uncorrelated with the row, so the planner evaluates it once per query as an InitPlan.
+- A document whose current version is `processing`, `failed`, missing or retracted is invisible to everyone, owner included (owners manage it through `authorAccessible`, which is unchanged). Clips and audio never reach the new branch.
+- Hand copies of the rule that never call `readerVisibleSql` (`platform_audience_of_content`, `platform_digest_items`; `platform_viewers_of_version` for the same document condition) carry the same clause, calling `documents_enabled_unchecked(org)` because the worker has no tenant context. A test enumerates the latest definition of every function in `packages/db/migrations/*.sql` that contains a predicate key and every TypeScript caller of `readerVisibleSql`; it fails when a new copy appears.
+- Flag and kill switch changes advance the org content epoch (`org_epoch_advance`), so cached permitted-id sets are never used across a flag change. Cached id sets only narrow candidates; every returned chunk is re-checked by the full predicate inside the request snapshot.
+- Retraction and expiry are unchanged and still apply to documents; the flag only adds a way to make documents unreachable without retracting them (retraction is terminal, the flag is reversible).
+
 ### Generated SQL predicate
 
 `packages/authz/sql.ts` generates `readerVisible` once, parameterised by `(:org, :user)`:
@@ -74,7 +91,7 @@ AND EXISTS (
 1. If the user's permitted current-version set is small (below a configured threshold, default 5,000), compute it, cache it keyed by `(org, user, authz_epoch, org_content_epoch, time_bucket)` (ADR-0004) and query chunks with `content_version_id = ANY(:ids)`.
 2. Otherwise run the vector query with the predicate in `WHERE`, `hnsw.iterative_scan = relaxed_order`, over-fetching k×4 and re-ranking. If fewer than k rows return and `hnsw.max_scan_tuples` was hit, fall back to an exact scan over the permitted set (recall test in CI, F14).
 3. Post-check: before any chunk reaches the model, assert `readerVisible` for every chunk in the same transaction; a violation throws, logs `authz.leak_check_failed` and increments a metric that must stay at zero.
-4. Chunks join `content_version.status = 'current'` so retracted or superseded versions are never used even if an index lags.
+4. Chunks join `content_version.status = 'current'` so retracted or superseded versions are never used even if an index lags. For documents the chunks are written in the same transaction that makes the version current (`platform_document_finish`), never by the transcript indexer.
 
 ### Side channels
 
